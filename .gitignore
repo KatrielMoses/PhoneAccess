@@ -1,4 +1,5 @@
 dist/
+dev/
 /phoneaccess
 /phoneaccess.exe
 *.pdf
