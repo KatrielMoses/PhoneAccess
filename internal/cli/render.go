@@ -649,11 +649,7 @@ var (
 			Background(lipgloss.Color("#808080")).
 			Foreground(lipgloss.Color("#000000")).
 			Bold(true).
-			Padding(1, 2, 0, 2)
-	subtitleBannerStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#808080")).
-				Foreground(lipgloss.Color("#000000")).
-				Padding(0, 2, 1, 2)
+			Padding(1, 2)
 	sectionTitleStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("212")).
 				Bold(true).
@@ -681,12 +677,13 @@ var (
 )
 
 func banner() string {
-	art := " ___ _  _  ___  _  _ ___     _   ___ ___ ___ ___ ___ \n" +
-		"| _ \\ || |/ _ \\| \\| | __|   /_\\ / __/ __| __/ __/ __|\n" +
-		"|  _/ __ | (_) | .` | _|   / _ \\ (_| (__| _|\\__ \\__ \\\n" +
-		"|_| |_||_|\\___/|_|\\_|___| /_/ \\_\\___\\___|___|___/___/"
-	subtitle := "Open-source phone number OSINT  ·  v1.0.0  ·  github.com/KatrielMoses/PhoneAccess"
-	return bannerStyle.Render(art) + "\n" + subtitleBannerStyle.Render(subtitle)
+	return bannerStyle.Render(
+		" ___  _  _  ___  _  _ ___   _   ___ ___ ___ ___ ___ \n" +
+			"| _ \\ || |/ _ \\| \\| | __| /_\\ / __/ __| __/ __/ __|\n" +
+			"|  _/ __ | (_) | .` | _| / _ \\ (_| (__| _|\\__ \\__ \\\n" +
+			"|_| |_||_|\\___/|_|\\_|___/_/ \\_\\___\\___|___|___/___/\n" +
+			"phone number OSINT · v1.0.0 · github.com/KatrielMoses/PhoneAccess",
+	)
 }
 
 func row(label, value string) string {
