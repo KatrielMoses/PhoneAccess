@@ -6,23 +6,17 @@ PhoneAccess is a free, open-source phone number OSINT CLI for lawful security re
 
 ## Installation
 
-### Linux — one line (Debian, Ubuntu, Fedora, RHEL, Arch)
+### Linux / macOS
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/KatrielMoses/PhoneAccess/main/install.sh | sudo bash
 ```
 
-The script auto-detects your package manager and installs the `.deb`, `.rpm`, or raw binary as appropriate.
+### Windows (PowerShell)
 
-### macOS
-
-```sh
-brew install KatrielMoses/phoneaccess/phoneaccess
+```powershell
+irm https://raw.githubusercontent.com/KatrielMoses/PhoneAccess/main/install.ps1 | iex
 ```
-
-### Windows
-
-Download `phoneaccess_windows_amd64.exe` from [GitHub Releases](https://github.com/KatrielMoses/PhoneAccess/releases) and add to PATH.
 
 ### Go install (all platforms)
 
