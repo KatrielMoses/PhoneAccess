@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-$version = "v1.0.2"
+$version = "v1.0.3"
 $arch = if ([Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
 $url = "https://github.com/KatrielMoses/PhoneAccess/releases/download/$version/phoneaccess_windows_$arch.exe"
 $dest = "$env:LOCALAPPDATA\PhoneAccess"
