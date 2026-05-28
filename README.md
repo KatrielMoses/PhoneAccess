@@ -24,24 +24,48 @@ irm https://raw.githubusercontent.com/KatrielMoses/PhoneAccess/main/install.ps1 
 go install github.com/KatrielMoses/PhoneAccess/cmd/phoneaccess@latest
 ```
 
+## Quick Start
+
+```sh
+phoneaccess investigate +14155552671
+phoneaccess investigate +14155552671 -o report.pdf
+phoneaccess investigate +14155552671 --format json
+phoneaccess investigate -                              # read from stdin
+phoneaccess investigate +14155552671 --active          # include probing modules
+phoneaccess investigate +14155552671 -m enumerator     # specific module only
+phoneaccess investigate phones.txt --batch             # bulk investigation
+phoneaccess keys list
+phoneaccess keys set NUMVERIFY_API_KEY your-key-here
+phoneaccess modules
+phoneaccess setup whatsapp
+phoneaccess setup telegram
+phoneaccess cases list
+```
+
 ## Usage
 
 Run a full investigation:
 
 ```sh
-phoneaccess +14155552671
+phoneaccess investigate +14155552671
 ```
 
 Use passive mode to avoid active public lookup requests:
 
 ```sh
-phoneaccess +14155552671 --passive
+phoneaccess investigate +14155552671 --passive
 ```
 
 Run only selected modules. Non-selected modules are recorded as skipped in JSON output:
 
 ```sh
-phoneaccess +14155552671 --modules carrier,geo,spam
+phoneaccess investigate +14155552671 -m carrier,geo,spam
+```
+
+Read the phone number from stdin (useful for piping):
+
+```sh
+echo "+14155552671" | phoneaccess investigate -
 ```
 
 ## Module Tiers
@@ -54,16 +78,16 @@ PhoneAccess modules are split into two tiers:
 
 ```sh
 # Run passive modules only (default)
-phoneaccess +14155552671
+phoneaccess investigate +14155552671
 
 # Run all modules including active probing
-phoneaccess +14155552671 --active
+phoneaccess investigate +14155552671 --active
 
 # Run specific active module only
-phoneaccess +14155552671 --modules enumerator
+phoneaccess investigate +14155552671 -m enumerator
 
 # Batch mode also accepts --active
-phoneaccess batch phones.txt --active
+phoneaccess investigate phones.txt --batch --active
 ```
 
 `--passive` remains available for operators who want passive-mode behavior inside modules that support it.
@@ -71,25 +95,25 @@ phoneaccess batch phones.txt --active
 Export reports:
 
 ```sh
-phoneaccess +14155552671 --format json
-phoneaccess +14155552671 --format csv -o report.csv
-phoneaccess +14155552671 --format txt -o report.txt
-phoneaccess +14155552671 --format pdf -o report.pdf
+phoneaccess investigate +14155552671 --format json
+phoneaccess investigate +14155552671 --format csv -o report.csv
+phoneaccess investigate +14155552671 --format txt -o report.txt
+phoneaccess investigate +14155552671 --format pdf -o report.pdf
 ```
 
 Set a per-module timeout:
 
 ```sh
-phoneaccess +14155552671 --timeout 10
+phoneaccess investigate +14155552671 --timeout 10
 ```
 
 Investigate a batch file sequentially:
 
 ```sh
-phoneaccess batch phones.txt
-phoneaccess batch phones.txt --passive
-phoneaccess batch phones.txt --modules carrier,geo,spam
-phoneaccess batch phones.txt --active
+phoneaccess investigate phones.txt --batch
+phoneaccess investigate phones.txt --batch --passive
+phoneaccess investigate phones.txt --batch -m carrier,geo,spam
+phoneaccess investigate phones.txt --batch --active
 ```
 
 Batch files are plain text with one number per line. Blank lines and lines beginning with `#` are ignored. Batch mode writes `phoneaccess_batch_{timestamp}.csv` and `phoneaccess_batch_{timestamp}.json` in the current directory.
@@ -119,6 +143,8 @@ phoneaccess keys set TWILIO_AUTH_TOKEN your_token
 phoneaccess keys set TWILIO_ENABLE_CALLER_NAME true
 phoneaccess keys set TRUECALLER_INSTALLATION_ID your_session_token
 phoneaccess keys unset OPENCNAM_SID
+phoneaccess setup whatsapp
+phoneaccess setup telegram
 ```
 
 ## Modules

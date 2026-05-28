@@ -67,33 +67,148 @@ func NewRootCommand(version, buildDate string, registry []core.Module) *cobra.Co
 	}
 
 	cmd := &cobra.Command{
-		Use:           "phoneaccess <number>",
+		Use:           "phoneaccess",
 		Short:         "Offline phone number intelligence toolkit",
-		Args:          cobra.ExactArgs(1),
+		Args:          cobra.ArbitraryArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return opts.runInvestigation(cmd.Context(), cmd.OutOrStdout(), args[0])
+			if len(args) == 0 {
+				return cmd.Help()
+			}
+			raw := args[0]
+			if strings.HasPrefix(raw, "+") || looksLikeNumber(raw) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "Note: bare number syntax is deprecated. Use: phoneaccess investigate %s\n\n", raw)
+				return opts.runInvestigation(cmd.Context(), cmd.OutOrStdout(), raw)
+			}
+			return cmd.Help()
 		},
 	}
 
+	// Flags for the deprecated bare-number path (hidden so they don't clutter help).
 	cmd.Flags().StringVar(&opts.format, "format", "terminal", "output format: terminal, json, csv, txt, or pdf")
-	cmd.Flags().StringVar(&opts.moduleNames, "modules", "", "comma-separated list of modules to run")
+	cmd.Flags().StringVarP(&opts.moduleNames, "modules", "m", "", "comma-separated list of modules to run")
 	cmd.Flags().BoolVar(&opts.active, "active", false, "run active/probing modules")
 	cmd.Flags().BoolVar(&opts.passive, "passive", false, "disable active network probing")
 	cmd.Flags().BoolVar(&opts.noSave, "no-save", false, "skip database persistence")
 	cmd.Flags().IntVar(&opts.autoPivot, "auto-pivot", 0, "maximum auto-pivot hop depth")
 	cmd.Flags().StringVarP(&opts.output, "output", "o", "", "write output to file path")
 	cmd.Flags().IntVar(&opts.timeoutSecs, "timeout", 30, "per-module timeout in seconds")
+	if err := cmd.Flags().MarkHidden("format"); err == nil {
+		_ = cmd.Flags().MarkHidden("modules")
+		_ = cmd.Flags().MarkHidden("m")
+		_ = cmd.Flags().MarkHidden("active")
+		_ = cmd.Flags().MarkHidden("passive")
+		_ = cmd.Flags().MarkHidden("no-save")
+		_ = cmd.Flags().MarkHidden("auto-pivot")
+		_ = cmd.Flags().MarkHidden("output")
+		_ = cmd.Flags().MarkHidden("o")
+		_ = cmd.Flags().MarkHidden("timeout")
+	}
 
+	cmd.AddCommand(newInvestigateCommand(opts))
 	cmd.AddCommand(newVersionCommand(version, buildDate))
 	cmd.AddCommand(newModulesCommand(registry))
 	cmd.AddCommand(newKeysCommand())
-	cmd.AddCommand(newBatchCommand(opts))
-	cmd.AddCommand(newWhatsAppCommand())
-	cmd.AddCommand(newTelegramCommand())
+	cmd.AddCommand(newSetupCommand())
 	cmd.AddCommand(newCasesCommand())
 
+	return cmd
+}
+
+func looksLikeNumber(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func newInvestigateCommand(o *options) *cobra.Command {
+	// Local opts for the investigate subcommand — separate FlagSet from root.
+	local := &options{
+		format:      "terminal",
+		timeoutSecs: 30,
+		allModules:  o.allModules,
+		version:     o.version,
+		buildDate:   o.buildDate,
+	}
+	var batch bool
+
+	cmd := &cobra.Command{
+		Use:          "investigate <number|file|->",
+		Short:        "Investigate a phone number",
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			arg := args[0]
+			if batch {
+				return local.runBatch(cmd.Context(), cmd.OutOrStdout(), arg, time.Now)
+			}
+			if arg == "-" {
+				scanner := bufio.NewScanner(cmd.InOrStdin())
+				if !scanner.Scan() {
+					return errors.New("no input on stdin")
+				}
+				arg = strings.TrimSpace(scanner.Text())
+				if arg == "" {
+					return errors.New("empty phone number from stdin")
+				}
+			}
+			return local.runInvestigation(cmd.Context(), cmd.OutOrStdout(), arg)
+		},
+	}
+
+	cmd.Flags().StringVar(&local.format, "format", "terminal", "output format: terminal, json, csv, txt, or pdf")
+	cmd.Flags().StringVarP(&local.moduleNames, "modules", "m", "", "comma-separated list of modules to run")
+	cmd.Flags().BoolVar(&local.active, "active", false, "run active/probing modules")
+	cmd.Flags().BoolVar(&local.passive, "passive", false, "disable active network probing")
+	cmd.Flags().BoolVar(&local.noSave, "no-save", false, "skip database persistence")
+	cmd.Flags().IntVar(&local.autoPivot, "auto-pivot", 0, "maximum auto-pivot hop depth")
+	cmd.Flags().StringVarP(&local.output, "output", "o", "", "write output to file path")
+	cmd.Flags().IntVar(&local.timeoutSecs, "timeout", 30, "per-module timeout in seconds")
+	cmd.Flags().BoolVar(&batch, "batch", false, "treat argument as a file of phone numbers")
+
+	return cmd
+}
+
+func newSetupCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          "setup",
+		Short:        "Configure integrations",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:          "whatsapp",
+		Short:        "Link your WhatsApp account by QR",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := whatsapp.Setup(cmd.Context(), cmd.OutOrStdout()); err != nil {
+				return err
+			}
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), "WhatsApp session saved to ~/.phoneaccess/whatsapp_session.db")
+			return err
+		},
+	})
+	cmd.AddCommand(&cobra.Command{
+		Use:          "telegram",
+		Short:        "Authenticate Telegram with phone and OTP",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := telegram.Setup(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout()); err != nil {
+				return err
+			}
+			_, err := fmt.Fprintln(cmd.OutOrStdout(), "Telegram session saved to ~/.phoneaccess/telegram_session.json")
+			return err
+		},
+	})
 	return cmd
 }
 
@@ -383,23 +498,6 @@ func newModulesCommand(registry []core.Module) *cobra.Command {
 	}
 }
 
-func newBatchCommand(o *options) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:          "batch <file>",
-		Short:        "Investigate phone numbers from a text file",
-		Args:         cobra.ExactArgs(1),
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return o.runBatch(cmd.Context(), cmd.OutOrStdout(), args[0], time.Now)
-		},
-	}
-	cmd.Flags().StringVar(&o.moduleNames, "modules", "", "comma-separated list of modules to run")
-	cmd.Flags().BoolVar(&o.active, "active", false, "run active/probing modules")
-	cmd.Flags().BoolVar(&o.passive, "passive", false, "disable active network probing")
-	cmd.Flags().IntVar(&o.timeoutSecs, "timeout", 30, "per-module timeout in seconds")
-	return cmd
-}
-
 func (o *options) runBatch(ctx context.Context, stdout io.Writer, path string, now func() time.Time) error {
 	if o.timeoutSecs <= 0 {
 		return errors.New("timeout must be greater than 0 seconds")
@@ -621,52 +719,6 @@ func newKeysCommand() *cobra.Command {
 		},
 	})
 
-	return cmd
-}
-
-func newWhatsAppCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:          "whatsapp",
-		Short:        "Manage WhatsApp session",
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:          "setup",
-		Short:        "Link your WhatsApp account by QR",
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := whatsapp.Setup(cmd.Context(), cmd.OutOrStdout()); err != nil {
-				return err
-			}
-			_, err := fmt.Fprintln(cmd.OutOrStdout(), "WhatsApp session saved to ~/.phoneaccess/whatsapp_session.db")
-			return err
-		},
-	})
-	return cmd
-}
-
-func newTelegramCommand() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:          "telegram",
-		Short:        "Manage Telegram session",
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-	}
-	cmd.AddCommand(&cobra.Command{
-		Use:          "setup",
-		Short:        "Authenticate Telegram with phone and OTP",
-		Args:         cobra.NoArgs,
-		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := telegram.Setup(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout()); err != nil {
-				return err
-			}
-			_, err := fmt.Fprintln(cmd.OutOrStdout(), "Telegram session saved to ~/.phoneaccess/telegram_session.json")
-			return err
-		},
-	})
 	return cmd
 }
 
