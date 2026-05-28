@@ -646,8 +646,14 @@ func (RiskScoreBlock) Render(report *core.InvestigationReport) string {
 
 var (
 	bannerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("39")).
-			Bold(true)
+			Background(lipgloss.Color("#808080")).
+			Foreground(lipgloss.Color("#000000")).
+			Bold(true).
+			Padding(1, 2, 0, 2)
+	subtitleBannerStyle = lipgloss.NewStyle().
+				Background(lipgloss.Color("#808080")).
+				Foreground(lipgloss.Color("#000000")).
+				Padding(0, 2, 1, 2)
 	sectionTitleStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("212")).
 				Bold(true).
@@ -675,13 +681,15 @@ var (
 )
 
 func banner() string {
-	return bannerStyle.Render(strings.Join([]string{
-		" ____  _                      _                         ",
-		"|  _ \\| |__   ___  _ __   ___| |    ___ ___ ___  ___ ___",
-		"| |_) | '_ \\ / _ \\| '_ \\ / _ \\ |   / __/ __/ _ \\/ __/ __|",
-		"|  __/| | | | (_) | | | |  __/ |  | (_| (_|  __/\\__ \\__ \\",
-		"|_|   |_| |_|\\___/|_| |_|\\___|_|   \\___\\___\\___||___/___/",
-	}, "\n"))
+	art := strings.Join([]string{
+		"██████  ██   ██  ██████  ███    ██ ███████      █████   ██████  ██████ ███████ ███████ ███████",
+		"██   ██ ██   ██ ██    ██ ████   ██ ██          ██   ██ ██      ██      ██      ██      ██",
+		"██████  ███████ ██    ██ ██ ██  ██ █████       ███████ ██      ██      █████   ███████ ███████",
+		"██      ██   ██ ██    ██ ██  ██ ██ ██          ██   ██ ██      ██      ██           ██      ██",
+		"██      ██   ██  ██████  ██   ████ ███████     ██   ██  ██████  ██████ ███████ ███████ ███████",
+	}, "\n")
+	subtitle := "Open-source phone number OSINT  ·  v1.0.0  ·  github.com/KatrielMoses/PhoneAccess"
+	return bannerStyle.Render(art) + "\n" + subtitleBannerStyle.Render(subtitle)
 }
 
 func row(label, value string) string {
