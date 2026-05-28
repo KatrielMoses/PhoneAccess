@@ -1,0 +1,23 @@
+- name: FSMB Physician Data Center
+  category: medical
+  state: US
+  search_url: https://www.fsmb.org/licensure/search/?q={number}
+  license_type: physician
+  name_regex: '(?i)(?:Name|Physician|Licensee)[:\s]+([A-Za-z0-9 .,''-]+)'
+  status_regex: '(?i)(?:Status|License Status)[:\s]+([A-Za-z0-9 .,''-]+)'
+
+- name: California State Bar Attorney Search
+  category: legal
+  state: CA
+  search_url: https://apps.calbar.ca.gov/attorney/LicenseeSearch/QuickSearch?q={number}
+  license_type: attorney
+  name_regex: '(?i)(?:Attorney|Name|Licensee)[:\s]+([A-Za-z0-9 .,''-]+)'
+  status_regex: '(?i)(?:Status|Current Status)[:\s]+([A-Za-z0-9 .,''-]+)'
+
+- name: Texas Real Estate Commission License Search
+  category: real_estate
+  state: TX
+  search_url: https://www.trec.texas.gov/apps/license-holder-search/?q={number}
+  license_type: real estate licensee
+  name_regex: '(?i)(?:Name|License Holder|Licensee)[:\s]+([A-Za-z0-9 .,''-]+)'
+  status_regex: '(?i)(?:Status|License Status)[:\s]+([A-Za-z0-9 .,''-]+)'

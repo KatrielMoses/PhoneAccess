@@ -1,0 +1,31 @@
+{
+  "area_codes": [
+    {
+      "area_code": "473",
+      "region": "Grenada",
+      "basis": "Public FTC/FCC consumer guidance has identified one-ring and callback scam complaint patterns involving some Caribbean NANP area codes."
+    },
+    {
+      "area_code": "809",
+      "region": "Dominican Republic",
+      "basis": "Public FTC/FCC consumer guidance has identified international callback and impostor scam complaint patterns involving some Caribbean NANP area codes."
+    },
+    {
+      "area_code": "876",
+      "region": "Jamaica",
+      "basis": "Public FTC/FCC consumer guidance has identified sweepstakes, impostor, and callback scam complaint patterns involving this region."
+    }
+  ],
+  "country_codes": [
+    {
+      "country_code": "234",
+      "region": "Nigeria",
+      "basis": "Public FTC complaint pattern summaries frequently cite international advance-fee, romance, and impostor scam reports associated with this country code."
+    },
+    {
+      "country_code": "91",
+      "region": "India",
+      "basis": "Public FTC/FCC complaint pattern summaries frequently cite overseas call-center impostor scam reports associated with this country code."
+    }
+  ]
+}

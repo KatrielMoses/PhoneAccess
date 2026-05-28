@@ -1,0 +1,91 @@
+[
+  {
+    "area_code": "212",
+    "country": "US",
+    "origin": "Manhattan, New York",
+    "region_name": "New York City, New York",
+    "timezone": "America/New_York",
+    "split_or_overlay": true,
+    "history": [
+      "Original 1947 NANP assignment for Manhattan",
+      "Overlaid by 646 in 1999 and 332 in 2017"
+    ],
+    "historical_carrier": "Verizon"
+  },
+  {
+    "area_code": "305",
+    "country": "US",
+    "origin": "Miami and the Florida Keys, Florida",
+    "region_name": "South Florida",
+    "timezone": "America/New_York",
+    "split_or_overlay": true,
+    "history": [
+      "Original 1947 NANP assignment for all of Florida",
+      "Split multiple times as Florida numbering expanded; overlaid by 786"
+    ],
+    "historical_carrier": "Southern Bell"
+  },
+  {
+    "area_code": "415",
+    "country": "US",
+    "origin": "San Francisco, California",
+    "region_name": "San Francisco Bay Area, California",
+    "timezone": "America/Los_Angeles",
+    "split_or_overlay": true,
+    "history": [
+      "Original 1947 NANP assignment for central coastal California",
+      "Split to create 408, 707, 510, and 650; overlaid by 628 in 2015"
+    ],
+    "historical_carrier": "Pacific Bell"
+  },
+  {
+    "area_code": "416",
+    "country": "CA",
+    "origin": "Toronto, Ontario",
+    "region_name": "Toronto, Ontario",
+    "timezone": "America/Toronto",
+    "split_or_overlay": true,
+    "history": [
+      "Original 1947 NANP assignment for much of southern Ontario",
+      "Split to create 519 and 905; overlaid by 647 and 437"
+    ],
+    "historical_carrier": "Bell Canada"
+  },
+  {
+    "area_code": "650",
+    "country": "US",
+    "origin": "San Mateo County and northern Santa Clara County, California",
+    "region_name": "San Francisco Peninsula, California",
+    "timezone": "America/Los_Angeles",
+    "split_or_overlay": true,
+    "history": [
+      "Split from area code 415 in 1997"
+    ],
+    "historical_carrier": "Pacific Bell"
+  },
+  {
+    "area_code": "876",
+    "country": "JM",
+    "origin": "Jamaica",
+    "region_name": "Jamaica",
+    "timezone": "America/Jamaica",
+    "split_or_overlay": true,
+    "history": [
+      "Split from area code 809 in 1997",
+      "Overlaid by 658 in 2018"
+    ],
+    "historical_carrier": "Cable & Wireless Jamaica"
+  },
+  {
+    "area_code": "929",
+    "country": "US",
+    "origin": "New York City outer boroughs overlay",
+    "region_name": "New York City, New York",
+    "timezone": "America/New_York",
+    "split_or_overlay": true,
+    "history": [
+      "Overlay for 718, 347, and 917 service areas, introduced in 2011"
+    ],
+    "historical_carrier": "Verizon"
+  }
+]

@@ -1,0 +1,13 @@
+name: phoneaccess
+arch: amd64
+platform: linux
+version: ${VERSION}
+maintainer: KatrielMoses
+description: Open-source phone number OSINT tool
+homepage: https://github.com/KatrielMoses/PhoneAccess
+license: MIT
+contents:
+  - src: dist/phoneaccess_linux_amd64
+    dst: /usr/bin/phoneaccess
+    file_info:
+      mode: 0755

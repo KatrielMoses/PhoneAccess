@@ -1,0 +1,30 @@
+[
+  {
+    "provider": "Google Voice",
+    "country": "US",
+    "prefixes": ["+1650253", "+1650396", "+1760277"]
+  },
+  {
+    "provider": "Twilio",
+    "country": "US",
+    "prefixes": ["+1500555", "+1415737", "+1929206"],
+    "ranges": [
+      {"start": "+15005550000", "end": "+15005559999"}
+    ]
+  },
+  {
+    "provider": "Bandwidth",
+    "country": "US",
+    "prefixes": ["+1919200", "+1984200", "+1727200"]
+  },
+  {
+    "provider": "Vonage",
+    "country": "US",
+    "prefixes": ["+1732202", "+1201201", "+1424200"]
+  },
+  {
+    "provider": "TextNow",
+    "country": "US",
+    "prefixes": ["+1226201", "+1289201", "+1587201"]
+  }
+]
