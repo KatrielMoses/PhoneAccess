@@ -5,8 +5,6 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -15,7 +13,5 @@ jobs:
           cache: false
       - name: Install nfpm
         run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
-      - run: make release
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
+      - run: make cross
+      - run: make package
