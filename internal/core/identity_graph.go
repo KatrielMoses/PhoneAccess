@@ -130,11 +130,12 @@ func walkIdentityData(value any, key, module string, add func(string, string, st
 func kindFromKey(key string) string {
 	key = strings.ToLower(strings.TrimSpace(key))
 	switch key {
-	case "name", "names", "name_hint", "caller_name", "owner", "owner_name", "discovered_names", "venmo_display_name":
+	case "name", "names", "name_hint", "caller_name", "owner", "owner_name", "discovered_names", "venmo_display_name",
+		"registrant_names", "registrant_name":
 		return "name"
 	case "entity_name", "entity_names", "company", "company_name", "company_names", "officer_name", "officer_names", "party_name", "party_names", "licensee_name", "licensee_names", "license_name", "license_names":
 		return "name"
-	case "email", "emails", "pivot_email", "pivot_emails":
+	case "email", "emails", "pivot_email", "pivot_emails", "registrant_emails":
 		return "email"
 	case "username", "usernames", "handle", "handles", "pivot_username", "pivot_usernames", "discovered_usernames", "venmo_username":
 		return "username"
@@ -142,6 +143,8 @@ func kindFromKey(key string) string {
 		return "social_link"
 	case "linked_account", "linked_accounts", "account", "accounts", "profile", "profiles":
 		return "linked_account"
+	case "domain", "domains", "discovered_domains", "pivot_domain", "pivot_domains", "associated_domains":
+		return "domain"
 	default:
 		return ""
 	}
@@ -155,11 +158,15 @@ func rankPivots(pivots map[string]*pivotAccumulator) []IdentityPivot {
 			modules = append(modules, module)
 		}
 		sort.Strings(modules)
+		conf := graphConfidenceForPivot(len(modules), modules)
+		if pivot.kind == "domain" {
+			conf = domainPivotConfidence(len(modules), modules)
+		}
 		out = append(out, IdentityPivot{
 			Type:       pivot.kind,
 			Value:      pivot.value,
 			Modules:    modules,
-			Confidence: graphConfidenceForPivot(len(modules), modules),
+			Confidence: conf,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -202,11 +209,17 @@ func graphConfidenceForPivot(moduleCount int, modules []string) string {
 		switch strings.ToLower(strings.TrimSpace(modules[0])) {
 		case "search", "paste":
 			return "low"
-		case "enumerator":
+		case "enumerator", "infrastructure":
 			return "inference"
 		}
 	}
 	return graphConfidence(moduleCount)
+}
+
+// domainPivotConfidence returns "inference" for all domain pivots regardless of source count.
+// Domain association via SSL CT is a weak signal.
+func domainPivotConfidence(_ int, _ []string) string {
+	return "inference"
 }
 
 func splitPivotList(value string) []string {

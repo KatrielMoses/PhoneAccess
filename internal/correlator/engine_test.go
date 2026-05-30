@@ -205,3 +205,7 @@ func claim(field, value, source, tier string, weight float64, now time.Time) PII
 		FetchedAt: now,
 	}
 }
+
+func (s fakeSource) ProxyAware() bool { return true }
+
+func (s fakeCompaniesHouse) ProxyAware() bool { return true }

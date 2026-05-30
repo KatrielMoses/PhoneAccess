@@ -138,3 +138,5 @@ func (r trestleResponse) Entries() []trestlePerson {
 	out = append(out, r.Results...)
 	return out
 }
+
+func (s *Source) ProxyAware() bool { return true }

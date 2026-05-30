@@ -30,14 +30,16 @@ type InvestigationLink struct {
 }
 
 type Investigation struct {
-	ID        int64
-	PhoneE164 string
-	CaseName  string
-	Tags      []string
-	Notes     string
-	RiskScore int
-	RiskBand  string
-	CreatedAt time.Time
+	ID         int64
+	PhoneE164  string
+	CaseName   string
+	Tags       []string
+	Notes      string
+	RiskScore  int
+	RiskBand   string
+	CreatedAt  time.Time
+	PivotType  string
+	PivotValue string
 }
 
 type PriorMatch struct {
@@ -114,6 +116,19 @@ func initSchema(db *sql.DB) error {
 
 	CREATE INDEX IF NOT EXISTS idx_phone ON investigations(phone_e164);
 	CREATE INDEX IF NOT EXISTS idx_pivot_value ON pivots(pivot_value);
+
+	CREATE TABLE IF NOT EXISTS photo_hashes (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		investigation_id INTEGER REFERENCES investigations(id),
+		phone_e164 TEXT,
+		source TEXT,
+		phash TEXT,
+		photo_path TEXT,
+		hamming_threshold INTEGER DEFAULT 10,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_phash ON photo_hashes(phash);
 	`
 	_, err := db.Exec(schema)
 	if err != nil {
@@ -368,6 +383,36 @@ func (s *Store) GetInvestigationReport(id int64) (string, error) {
 	var report string
 	err := s.db.QueryRow(`SELECT report_json FROM investigations WHERE id = ?`, id).Scan(&report)
 	return report, err
+}
+
+// ListChildInvestigations returns investigations whose parent_investigation_id equals parentID.
+func (s *Store) ListChildInvestigations(parentID int64) ([]Investigation, error) {
+	rows, err := s.db.Query(`
+		SELECT id, phone_e164, case_name, tags, notes, risk_score, risk_band, created_at,
+		       COALESCE(pivot_type,''), COALESCE(pivot_value,'')
+		FROM investigations
+		WHERE parent_investigation_id = ?
+		ORDER BY id ASC
+	`, parentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []Investigation
+	for rows.Next() {
+		var inv Investigation
+		var tagsStr string
+		if err := rows.Scan(&inv.ID, &inv.PhoneE164, &inv.CaseName, &tagsStr, &inv.Notes,
+			&inv.RiskScore, &inv.RiskBand, &inv.CreatedAt, &inv.PivotType, &inv.PivotValue); err != nil {
+			return nil, err
+		}
+		if tagsStr != "" {
+			inv.Tags = strings.Split(tagsStr, ",")
+		}
+		out = append(out, inv)
+	}
+	return out, nil
 }
 
 func (s *Store) UpdateTag(id int64, tag string) error {

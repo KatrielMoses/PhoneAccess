@@ -24,6 +24,62 @@ irm https://raw.githubusercontent.com/KatrielMoses/PhoneAccess/main/install.ps1 
 go install github.com/KatrielMoses/PhoneAccess/cmd/phoneaccess@latest
 ```
 
+## OPSEC
+
+PhoneAccess is designed for use by professional investigators. All active module runs expose your IP address to probed services by default. Configure OPSEC before running active investigations.
+
+### Proxy and Tor
+
+```sh
+phoneaccess investigate +14155552671 --proxy socks5://127.0.0.1:9050
+phoneaccess investigate +14155552671 --proxy http://user:pass@proxy.host:8080
+phoneaccess investigate +14155552671 --tor
+phoneaccess investigate +14155552671 --tor --tor-address 127.0.0.1:9150
+phoneaccess investigate +14155552671 --tor --tor-skip-check
+```
+
+### DNS-over-HTTPS
+
+```sh
+phoneaccess investigate +14155552671 --doh
+phoneaccess investigate +14155552671 --doh --doh-provider google
+phoneaccess investigate +14155552671 --doh --doh-provider quad9
+phoneaccess investigate +14155552671 --doh --doh-provider https://custom.resolver.example/dns-query
+```
+
+### User-Agent
+
+```sh
+phoneaccess investigate +14155552671 --ua-mode random
+phoneaccess investigate +14155552671 --user-agent "Mozilla/5.0 ..."
+```
+
+### Persistent OPSEC configuration
+
+```sh
+phoneaccess keys set TOR_ENABLED true
+phoneaccess keys set PROXY_URL socks5://127.0.0.1:9050
+phoneaccess keys set PHONEACCESS_DOH_ENABLED true
+phoneaccess keys set PHONEACCESS_DOH_PROVIDER cloudflare
+phoneaccess keys set PHONEACCESS_UA_MODE random
+```
+
+### OPSEC pre-flight prompt
+
+Active runs display a summary of the current OPSEC state (proxy, DoH, UA mode) and ask for confirmation before any modules execute. Pass `--yes` / `-y` to skip for non-interactive or scripted use:
+
+```sh
+phoneaccess investigate +14155552671 --active --yes
+```
+
+### Session file encryption
+
+Telegram and WhatsApp session files are encrypted at rest using AES-256-GCM. The default key is derived from the machine ID and is transparent. Set `SESSION_KEY_SOURCE=passphrase` to require a passphrase on each use, or `both` for passphrase + machine ID.
+
+```sh
+phoneaccess keys set SESSION_KEY_SOURCE passphrase
+```
+
 ## Quick Start
 
 ```sh
@@ -40,6 +96,17 @@ phoneaccess modules
 phoneaccess setup whatsapp
 phoneaccess setup telegram
 phoneaccess cases list
+phoneaccess cases show 3
+phoneaccess cases tag 3 fraud
+phoneaccess cases note 3 "Confirmed Truecaller identity"
+phoneaccess cases name 3 "Smith investigation"
+phoneaccess cases delete 3
+phoneaccess cases search "Smith"
+phoneaccess pivot email discovered@example.com
+phoneaccess pivot username johndoe
+phoneaccess pivot domain example.com
+phoneaccess pivot name "John Smith"
+phoneaccess pivot phone +14155552671
 ```
 
 ## Usage
@@ -118,6 +185,198 @@ phoneaccess investigate phones.txt --batch --active
 
 Batch files are plain text with one number per line. Blank lines and lines beginning with `#` are ignored. Batch mode writes `phoneaccess_batch_{timestamp}.csv` and `phoneaccess_batch_{timestamp}.json` in the current directory.
 
+## Compact and field mode
+
+**Compact mode** — a ≤6-line triage summary instead of the full terminal report:
+
+```sh
+phoneaccess investigate +14155552671 --compact
+phoneaccess investigate +14155552671 --format compact
+phoneaccess investigate phones.txt --batch --compact
+```
+
+Example output:
+```
++14155552671  US · AT&T Mobility · Mobile · California
+RISK: 45/100 MODERATE  |  Spam: 0 reports  |  Breaches: 2  |  Services: 3/277
+Identity: John S. (0.82, Truecaller)  |  Email pivot: j***@gmail.com
+Messenger: ✓WhatsApp  ✓Telegram  —Signal
+Timeline: first seen 2021-03-14  |  last seen 2024-11-08
+```
+
+Risk band is colour-coded: green `LOW`, yellow `MODERATE`, red `HIGH`/`CRITICAL`. Fields with no data are omitted. Wraps gracefully at 80 characters. No banner. No section headers.
+
+Persist compact as the default with a config key:
+```sh
+phoneaccess keys set PHONEACCESS_COMPACT true
+# or
+export PHONEACCESS_COMPACT=true
+```
+
+**Field mode** — a single pipe-delimited line for logging, grep, and scripting:
+
+```sh
+phoneaccess investigate +14155552671 --field
+phoneaccess investigate phones.txt --batch --field
+```
+
+Example output:
+```
++14155552671|MODERATE|45|AT&T Mobility|Mobile|US|2|3|John S.|WhatsApp,Telegram
+```
+
+Field order: `e164|risk_band|risk_score|carrier|line_type|country|breach_count|service_hits|top_name|messengers`
+
+Empty fields output as an empty string between delimiters. No colour codes.
+
+```sh
+# Extract just the risk band
+phoneaccess investigate +14155552671 --field | cut -d'|' -f2
+
+# Filter a batch by risk band
+phoneaccess investigate phones.txt --batch --field | grep HIGH
+```
+
+`--compact` and `--field` are mutually exclusive.
+
+## Webhook notifications
+
+PhoneAccess can POST a JSON payload to a webhook after every investigation.
+
+```sh
+# One-off override
+phoneaccess investigate +14155552671 --webhook https://hooks.slack.com/T00000000/B00000000/XXXX
+
+# Persist via config keys
+phoneaccess keys set PHONEACCESS_WEBHOOK_URL https://hooks.slack.com/...
+phoneaccess keys set PHONEACCESS_WEBHOOK_SECRET mysigningkey    # optional
+phoneaccess keys set PHONEACCESS_WEBHOOK_RISK_MIN MODERATE       # default: HIGH
+```
+
+| Config key | Default | Description |
+| --- | --- | --- |
+| `PHONEACCESS_WEBHOOK_URL` | — | Webhook endpoint URL |
+| `PHONEACCESS_WEBHOOK_SECRET` | — | HMAC-SHA256 signing secret (optional); adds `X-PhoneAccess-Signature: sha256=<hex>` header |
+| `PHONEACCESS_WEBHOOK_RISK_MIN` | `HIGH` | Minimum risk band to notify: `LOW`, `MODERATE`, `HIGH`, `CRITICAL` |
+
+**Payload format:**
+
+```json
+{
+  "event": "investigation_complete",
+  "timestamp": "2026-05-29T12:00:00Z",
+  "phone": "+14155552671",
+  "risk_score": 45,
+  "risk_band": "MODERATE",
+  "top_findings": {
+    "carrier": "AT&T Mobility",
+    "breach_count": 2,
+    "service_hits": 3,
+    "top_name": "John S.",
+    "messengers": ["WhatsApp", "Telegram"]
+  },
+  "case_id": 42
+}
+```
+
+Webhook delivery is best-effort: one attempt, 10-second timeout. If delivery fails, a warning is printed to stderr but the investigation result is unaffected.
+
+**Supported targets:**
+
+- **Slack**: `PHONEACCESS_WEBHOOK_URL=https://hooks.slack.com/services/T.../B.../...`
+- **Generic HTTP endpoint**: any HTTPS URL that accepts a POST with `Content-Type: application/json`
+- **Discord**: `PHONEACCESS_WEBHOOK_URL=https://discord.com/api/webhooks/{id}/{token}` — automatically detected; payload is reformatted as a Discord embed:
+
+```json
+{
+  "content": "⚠ PhoneAccess Alert",
+  "embeds": [{
+    "title": "+14155552671 — HIGH (70/100)",
+    "color": 15158332,
+    "fields": [
+      {"name": "Risk Band", "value": "HIGH", "inline": true},
+      {"name": "Carrier", "value": "AT&T Mobility", "inline": true},
+      {"name": "Breaches", "value": "2", "inline": true},
+      {"name": "Services", "value": "3", "inline": true}
+    ]
+  }]
+}
+```
+
+**Batch mode:** when `--batch` is combined with a webhook, one notification is fired per investigation as it completes — not a single summary at the end.
+
+## Pivoting
+
+Pivot from any artifact discovered during an investigation to expand coverage.
+
+```sh
+phoneaccess pivot email discovered@example.com
+phoneaccess pivot email discovered@example.com --case 4
+phoneaccess pivot username johndoe
+phoneaccess pivot domain example.com
+phoneaccess pivot name "John Smith"
+phoneaccess pivot phone +14155552671
+```
+
+All pivot types support `--format json`, `--no-save`, and `--case <id>` to link the pivot to a parent case in the SQLite database.
+
+`pivot phone` additionally supports `--active`, `--yes`, `--timeout`, `--compact`, and `--field`.
+
+`pivot domain` runs SSL certificate transparency (crt.sh), WHOIS/RDAP registrant lookup, and VirusTotal domain intelligence (when `VIRUSTOTAL_API_KEY` is configured).
+
+`pivot username` searches the full enumerator service list (200+ platforms) and returns a profile URL per hit.
+
+`pivot email` runs breach, search, and paste modules against the email address and prints a cross-tool suggestion for MailAccess.
+
+## Output Modes
+
+### Full report (default)
+
+```sh
+phoneaccess investigate +14155552671
+```
+
+### Compact — fast triage
+
+A ≤6-line summary with colour-coded risk band. Fields with no data are omitted. Wraps at 80 columns.
+
+```sh
+phoneaccess investigate +14155552671 --compact
+phoneaccess investigate phones.txt --batch --compact
+```
+
+Persist as default:
+
+```sh
+phoneaccess keys set PHONEACCESS_COMPACT true
+```
+
+### Field — pipeline-safe single line
+
+Pipe-delimited: `e164|risk_band|risk_score|carrier|line_type|country|breach_count|service_hits|top_name|messengers`
+
+```sh
+phoneaccess investigate +14155552671 --field
+phoneaccess investigate phones.txt --batch --field | grep "HIGH\|CRITICAL"
+phoneaccess investigate phones.txt --batch --field | cut -d'|' -f2
+```
+
+`--compact` and `--field` are mutually exclusive.
+
+### Confidence filtering
+
+Hide terminal findings below a confidence threshold. JSON output always includes all findings.
+
+```sh
+phoneaccess investigate +14155552671 --min-confidence 0.75
+```
+
+Persist:
+
+```sh
+phoneaccess keys set PHONEACCESS_MIN_CONFIDENCE 0.75
+```
+
 Other commands:
 
 ```sh
@@ -165,6 +424,10 @@ phoneaccess setup telegram
 | truecaller | active | yes | Unofficial Truecaller session-token scanner for rich identity pivots. |
 | telegram | active | yes | Telegram account discovery using the official MTProto contacts import flow. |
 | whatsapp | active | no | WhatsApp presence checks through the user's linked WhatsApp Web session. |
+| signal | active | no | Signal registration check via HMAC-SHA256 hashed CDN lookup. Profile photo retrieval and pHash capture. No credentials required. |
+| infrastructure | active | optional | SSL certificate transparency (crt.sh), WHOIS/RDAP registrant lookup, VirusTotal cross-reference (VIRUSTOTAL_API_KEY), MalwareBazaar search. |
+| intelligence | active | optional | OpenSanctions sanctions and PEP screening across 100+ official lists. Adverse-media screening with risk keyword extraction. OPENSANCTIONS_API_KEY unlocks higher rate limits. |
+| image_intelligence | active | optional | TinEye reverse image search (TINEYE_API_KEY). Google Lens, Yandex, Bing, and TinEye web URL generation. Cross-session pHash deduplication via SQLite. |
 | phase1-stub | passive | no | Offline placeholder for future OSINT modules. |
 
 Every report includes a final risk score from 0 to 100, a band (`LOW`, `MODERATE`, `HIGH`, `CRITICAL`), the top contributing drivers, and a one-sentence summary.
@@ -192,15 +455,64 @@ Reports also include an `identity_record` generated by the jurisdiction-aware co
 | `DEHASHED_API_KEY` | DeHashed breach search API key | Free tier queries are limited | `phoneaccess keys set DEHASHED_API_KEY <key>` or environment variable |
 | `NUMLOOKUP_API_KEY` | NumLookup API | 500/month free tier | `phoneaccess keys set NUMLOOKUP_API_KEY <key>` or environment variable |
 | `LEAKSIGHT_API_KEY` | LeakSight | Varies by LeakSight plan | `phoneaccess keys set LEAKSIGHT_API_KEY <key>` or environment variable |
+| `HIBP_API_KEY` | Have I Been Pwned breach intelligence — most recognised breach database, signup: haveibeenpwned.com/API/Key | $3.50/month (no free tier for the breachedaccount endpoint) | `phoneaccess keys set HIBP_API_KEY <key>` or environment variable |
+| `OPENSANCTIONS_API_KEY` | OpenSanctions — OFAC SDN, UN, EU, UK HMT, 100+ official sanctions/PEP lists (used by intelligence module, --active). Search endpoint always runs without a key; key unlocks higher rate limits and match API. Free tier: 10,000 req/month at opensanctions.org/api | 10,000/month free tier | `phoneaccess keys set OPENSANCTIONS_API_KEY <key>` or environment variable |
 | `TRESTLE_API_KEY` | Trestle IQ | Paid/partner access | `phoneaccess keys set TRESTLE_API_KEY <key>` or environment variable |
 | `TWILIO_ACCOUNT_SID` | Twilio Lookup v2, signup: https://www.twilio.com/en-us/go/try-twilio-de-1 | Pay-per-use | `phoneaccess keys set TWILIO_ACCOUNT_SID <sid>` or environment variable |
 | `TWILIO_AUTH_TOKEN` | Twilio Lookup v2, signup: https://www.twilio.com/en-us/go/try-twilio-de-1 | Pay-per-use | `phoneaccess keys set TWILIO_AUTH_TOKEN <token>` or environment variable |
 | `TWILIO_ENABLE_CALLER_NAME` | Twilio caller name opt-in | Additional per-lookup cost if enabled | `phoneaccess keys set TWILIO_ENABLE_CALLER_NAME true` or environment variable |
 | `TRUECALLER_INSTALLATION_ID` | Truecaller unofficial session token, install/signup: https://www.truecaller.com/download | No public free tier; operator-managed session token | `phoneaccess keys set TRUECALLER_INSTALLATION_ID <token>` or environment variable |
+| `PHONEACCESS_USER_AGENT` | Custom User-Agent string (used when `--ua-mode=custom` or `--user-agent` flag is set) | — | `phoneaccess keys set PHONEACCESS_USER_AGENT "Mozilla/5.0 ..."` or environment variable |
+| `PHONEACCESS_UA_MODE` | UA rotation mode: `fixed` (default), `random`, `custom` | — | `phoneaccess keys set PHONEACCESS_UA_MODE random` or environment variable |
+| `PHONEACCESS_COMPACT` | Set to `true` to use compact triage output (≤6 lines) as the persistent default | — | `phoneaccess keys set PHONEACCESS_COMPACT true` or environment variable |
+| `PHONEACCESS_WEBHOOK_URL` | Webhook endpoint URL; supports Slack, Discord (auto-detected), and generic HTTP | — | `phoneaccess keys set PHONEACCESS_WEBHOOK_URL https://...` or environment variable |
+| `PHONEACCESS_WEBHOOK_SECRET` | HMAC-SHA256 signing secret; adds `X-PhoneAccess-Signature` header for payload verification | — | `phoneaccess keys set PHONEACCESS_WEBHOOK_SECRET <secret>` or environment variable |
+| `PHONEACCESS_WEBHOOK_RISK_MIN` | Minimum risk band to trigger webhook: `LOW`, `MODERATE`, `HIGH`, `CRITICAL` | `HIGH` | `phoneaccess keys set PHONEACCESS_WEBHOOK_RISK_MIN MODERATE` or environment variable |
+| `PROXY_URL` | Proxy URL for all requests — equivalent to `--proxy` flag | — | `phoneaccess keys set PROXY_URL socks5://127.0.0.1:9050` or environment variable |
+| `TOR_ENABLED` | Set to `true` to route all requests through Tor (127.0.0.1:9050) — equivalent to `--tor` flag | — | `phoneaccess keys set TOR_ENABLED true` or environment variable |
+| `TOR_ADDRESS` | Custom Tor SOCKS5 address (default: 127.0.0.1:9050) — equivalent to `--tor-address` flag | — | `phoneaccess keys set TOR_ADDRESS 127.0.0.1:9150` or environment variable |
+| `PHONEACCESS_DOH_ENABLED` | Set to `true` to enable DNS-over-HTTPS on every run — equivalent to `--doh` flag | — | `phoneaccess keys set PHONEACCESS_DOH_ENABLED true` or environment variable |
+| `PHONEACCESS_DOH_PROVIDER` | DoH provider: `cloudflare` (default), `google`, `quad9`, or a custom URL | — | `phoneaccess keys set PHONEACCESS_DOH_PROVIDER google` or environment variable |
+| `SESSION_KEY_SOURCE` | Session file encryption key source: `machine` (default, transparent), `passphrase` (PBKDF2-SHA256), `both` (passphrase + machine ID) | — | `phoneaccess keys set SESSION_KEY_SOURCE passphrase` or environment variable |
+| `SNUSBASE_API_KEY` | Snusbase breach intelligence | Paid | `phoneaccess keys set SNUSBASE_API_KEY <key>` or environment variable |
+| `BREACHDIRECTORY_API_KEY` | BreachDirectory breach search via RapidAPI | Free tier available via RapidAPI | `phoneaccess keys set BREACHDIRECTORY_API_KEY <key>` or environment variable |
+| `LEAKLOOKUP_API_KEY` | Leak-Lookup phone number breach search, signup: leak-lookup.com | Paid | `phoneaccess keys set LEAKLOOKUP_API_KEY <key>` or environment variable |
+| `VIRUSTOTAL_API_KEY` | VirusTotal threat intelligence (infrastructure module, pivot domain), signup: virustotal.com | 500 req/day free tier | `phoneaccess keys set VIRUSTOTAL_API_KEY <key>` or environment variable |
+| `TINEYE_API_KEY` | TinEye reverse image search, signup: tineye.com/api | 100 searches/month free tier | `phoneaccess keys set TINEYE_API_KEY <key>` or environment variable |
+| `PHASH_HAMMING_THRESHOLD` | Maximum Hamming distance for cross-session photo deduplication (default: 10; lower = stricter matching) | — | `phoneaccess keys set PHASH_HAMMING_THRESHOLD 8` or environment variable |
+| `PHONEACCESS_MIN_CONFIDENCE` | Default minimum confidence threshold for terminal display (0.0–1.0); findings below this are hidden from terminal but always present in JSON | — | `phoneaccess keys set PHONEACCESS_MIN_CONFIDENCE 0.6` or environment variable |
 
 API providers change limits over time. Check each provider's current pricing and acceptable-use terms before using a key.
 
 Truecaller integration uses an unofficial session token. This is unsupported by Truecaller and may violate their Terms of Service. Use is the responsibility of the operator. Session tokens are obtained by registering the official Truecaller app on your own device.
+
+## Request Fingerprint Hardening
+
+By default PhoneAccess selects one realistic browser User-Agent at startup (fixed mode) and uses it for every request in that run. This looks like a single consistent browser session rather than a rotating bot. Browser-appropriate header profiles (Accept, Accept-Language, Sec-CH-UA, etc.) are injected automatically. Rate-limit delays include ±30% random jitter to avoid fixed timing fingerprints.
+
+### User-Agent modes
+
+| Flag | Config key | Values | Behaviour |
+| --- | --- | --- | --- |
+| `--ua-mode` | `PHONEACCESS_UA_MODE` | `fixed` (default), `random`, `custom` | How UA is selected per request |
+| `--user-agent` | `PHONEACCESS_USER_AGENT` | any string | Custom UA string; implies `custom` mode |
+
+```sh
+# Default: one consistent browser UA for the whole run
+phoneaccess investigate +14155552671
+
+# New random UA per request (useful with a proxy pool)
+phoneaccess investigate +14155552671 --ua-mode random
+
+# Supply your own UA string
+phoneaccess investigate +14155552671 --user-agent "Mozilla/5.0 ..."
+
+# Persist via config key
+phoneaccess keys set PHONEACCESS_UA_MODE random
+phoneaccess keys set PHONEACCESS_USER_AGENT "Mozilla/5.0 ..."
+```
+
+The embedded UA pool covers Chrome on Windows and macOS, Firefox on Windows and Linux, Safari on macOS, and Chrome on Android (22 variants). Chrome UAs receive full `Sec-CH-UA` / `Sec-Fetch-*` headers; Safari UAs omit `Sec-CH-UA` (matching real browser behaviour). Module-set headers (Authorization, API keys) always take precedence over profile headers.
 
 ## Building
 

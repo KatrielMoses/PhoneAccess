@@ -7,9 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -44,17 +48,30 @@ import (
 )
 
 type options struct {
-	format      string
-	moduleNames string
-	passive     bool
-	active      bool
-	noSave      bool
-	autoPivot   int
-	output      string
-	timeoutSecs int
-	allModules  []core.Module
-	version     string
-	buildDate   string
+	format       string
+	moduleNames  string
+	passive      bool
+	active       bool
+	noSave       bool
+	autoPivot    int
+	output       string
+	timeoutSecs  int
+	proxyURL     string
+	tor          bool
+	torAddress   string
+	torSkipCheck bool
+	userAgent    string
+	uaMode       string
+	doh          bool
+	dohProvider  string
+	yes           bool // skip OPSEC pre-flight prompt
+	minConfidence float64
+	allModules    []core.Module
+	version       string
+	buildDate     string
+	compact      bool   // compact triage output (≤6 lines)
+	field        bool   // single pipe-delimited line for scripting
+	webhookURL   string // override PHONEACCESS_WEBHOOK_URL for one run
 }
 
 func NewRootCommand(version, buildDate string, registry []core.Module) *cobra.Command {
@@ -94,6 +111,13 @@ func NewRootCommand(version, buildDate string, registry []core.Module) *cobra.Co
 	cmd.Flags().IntVar(&opts.autoPivot, "auto-pivot", 0, "maximum auto-pivot hop depth")
 	cmd.Flags().StringVarP(&opts.output, "output", "o", "", "write output to file path")
 	cmd.Flags().IntVar(&opts.timeoutSecs, "timeout", 30, "per-module timeout in seconds")
+	cmd.Flags().StringVar(&opts.proxyURL, "proxy", "", "Proxy URL (e.g. socks5://127.0.0.1:9050, http://user:pass@host:port)")
+	cmd.Flags().BoolVar(&opts.tor, "tor", false, "Route all requests through Tor (shorthand for --proxy socks5://127.0.0.1:9050)")
+	cmd.Flags().StringVar(&opts.torAddress, "tor-address", "", "Custom Tor SOCKS5 address (default: 127.0.0.1:9050)")
+	cmd.Flags().BoolVar(&opts.torSkipCheck, "tor-skip-check", false, "Skip Tor connectivity check")
+	cmd.Flags().StringVar(&opts.userAgent, "user-agent", "", "Custom User-Agent string (sets --ua-mode=custom)")
+	cmd.Flags().StringVar(&opts.uaMode, "ua-mode", "", "UA rotation mode: fixed (default), random, custom")
+
 	if err := cmd.Flags().MarkHidden("format"); err == nil {
 		_ = cmd.Flags().MarkHidden("modules")
 		_ = cmd.Flags().MarkHidden("m")
@@ -104,6 +128,12 @@ func NewRootCommand(version, buildDate string, registry []core.Module) *cobra.Co
 		_ = cmd.Flags().MarkHidden("output")
 		_ = cmd.Flags().MarkHidden("o")
 		_ = cmd.Flags().MarkHidden("timeout")
+		_ = cmd.Flags().MarkHidden("proxy")
+		_ = cmd.Flags().MarkHidden("tor")
+		_ = cmd.Flags().MarkHidden("tor-address")
+		_ = cmd.Flags().MarkHidden("tor-skip-check")
+		_ = cmd.Flags().MarkHidden("user-agent")
+		_ = cmd.Flags().MarkHidden("ua-mode")
 	}
 
 	cmd.AddCommand(newInvestigateCommand(opts))
@@ -112,6 +142,7 @@ func NewRootCommand(version, buildDate string, registry []core.Module) *cobra.Co
 	cmd.AddCommand(newKeysCommand())
 	cmd.AddCommand(newSetupCommand())
 	cmd.AddCommand(newCasesCommand())
+	cmd.AddCommand(newPivotCommand(opts))
 
 	return cmd
 }
@@ -145,6 +176,9 @@ func newInvestigateCommand(o *options) *cobra.Command {
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if local.compact && local.field {
+				return errors.New("--compact and --field are mutually exclusive")
+			}
 			arg := args[0]
 			if batch {
 				return local.runBatch(cmd.Context(), cmd.OutOrStdout(), arg, time.Now)
@@ -163,7 +197,7 @@ func newInvestigateCommand(o *options) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().StringVar(&local.format, "format", "terminal", "output format: terminal, json, csv, txt, or pdf")
+	cmd.Flags().StringVar(&local.format, "format", "terminal", "output format: terminal, json, csv, txt, pdf, gexf, jsonld, compact, field")
 	cmd.Flags().StringVarP(&local.moduleNames, "modules", "m", "", "comma-separated list of modules to run")
 	cmd.Flags().BoolVar(&local.active, "active", false, "run active/probing modules")
 	cmd.Flags().BoolVar(&local.passive, "passive", false, "disable active network probing")
@@ -172,6 +206,19 @@ func newInvestigateCommand(o *options) *cobra.Command {
 	cmd.Flags().StringVarP(&local.output, "output", "o", "", "write output to file path")
 	cmd.Flags().IntVar(&local.timeoutSecs, "timeout", 30, "per-module timeout in seconds")
 	cmd.Flags().BoolVar(&batch, "batch", false, "treat argument as a file of phone numbers")
+	cmd.Flags().StringVar(&local.proxyURL, "proxy", "", "Proxy URL (e.g. socks5://127.0.0.1:9050, http://user:pass@host:port)")
+	cmd.Flags().BoolVar(&local.tor, "tor", false, "Route all requests through Tor (shorthand for --proxy socks5://127.0.0.1:9050)")
+	cmd.Flags().StringVar(&local.torAddress, "tor-address", "", "Custom Tor SOCKS5 address (default: 127.0.0.1:9050)")
+	cmd.Flags().BoolVar(&local.torSkipCheck, "tor-skip-check", false, "Skip Tor connectivity check")
+	cmd.Flags().StringVar(&local.userAgent, "user-agent", "", "Custom User-Agent string (sets --ua-mode=custom)")
+	cmd.Flags().StringVar(&local.uaMode, "ua-mode", "", "UA rotation mode: fixed (default), random, custom")
+	cmd.Flags().BoolVar(&local.doh, "doh", false, "Enable DNS-over-HTTPS to prevent DNS leaks")
+	cmd.Flags().StringVar(&local.dohProvider, "doh-provider", "cloudflare", "DoH provider: cloudflare (default), google, quad9, or a custom URL")
+	cmd.Flags().BoolVarP(&local.yes, "yes", "y", false, "Skip OPSEC pre-flight prompt (for non-interactive/scripted use)")
+	cmd.Flags().Float64Var(&local.minConfidence, "min-confidence", 0, "hide terminal findings below this confidence (0 = show all; JSON always includes all)")
+	cmd.Flags().BoolVar(&local.compact, "compact", false, "compact triage output (≤6 lines); alias for --format compact")
+	cmd.Flags().BoolVar(&local.field, "field", false, "pipe-delimited single line for scripting; alias for --format field")
+	cmd.Flags().StringVar(&local.webhookURL, "webhook", "", "webhook URL to notify after investigation (overrides PHONEACCESS_WEBHOOK_URL)")
 
 	return cmd
 }
@@ -233,6 +280,31 @@ func (o *options) runInvestigation(ctx context.Context, stdout io.Writer, raw st
 	if err != nil {
 		return err
 	}
+
+	if err := resolveAndApplyProxy(ctx, o, stdout, selected); err != nil {
+		return err
+	}
+
+	if o.doh {
+		providerURL := core.ResolveDoHProviderURL(o.dohProvider)
+		if err := core.ApplyDoH(providerURL); err != nil {
+			return fmt.Errorf("apply DoH: %w", err)
+		}
+	}
+
+	if hasActiveModulesSelected(o, selected) && !o.yes {
+		if err := printOpsecWarning(stdout, buildOpsecState(o)); err != nil {
+			return err
+		}
+		ok, err := promptOpsecContinue(stdout, os.Stdin)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("aborted by user")
+		}
+	}
+
 	selectedNames := selectedModuleNames(o.moduleNames)
 	identitySelected := identityRecordSelected(o.moduleNames)
 
@@ -249,6 +321,7 @@ func (o *options) runInvestigation(ctx context.Context, stdout io.Writer, raw st
 		return err
 	}
 
+	var caseID int64
 	if o.autoPivot > 0 {
 		autoPivotResult, err := o.runAutoPivot(ctx, report)
 		if err != nil {
@@ -262,6 +335,7 @@ func (o *options) runInvestigation(ctx context.Context, stdout io.Writer, raw st
 			if err != nil {
 				return err
 			}
+			caseID = rootID
 			if autoPivotResult != nil {
 				if err := o.saveLinkedInvestigations(rootID, autoPivotResult.Linked); err != nil {
 					return err
@@ -269,19 +343,69 @@ func (o *options) runInvestigation(ctx context.Context, stdout io.Writer, raw st
 			}
 		}
 	} else if !o.noSave {
-		if _, err := o.saveInvestigationToDB(report, stdout, storage.InvestigationLink{}, true); err != nil {
+		id, err := o.saveInvestigationToDB(report, stdout, storage.InvestigationLink{}, true)
+		if err != nil {
 			return err
 		}
+		caseID = id
 	}
 
+	o.fireWebhook(ctx, report, caseID)
 	return o.writeReport(report, format, stdout)
 }
 
+// fireWebhook delivers a webhook notification in a best-effort manner.
+// Errors are logged as warnings to stdout but never fail the investigation.
+func (o *options) fireWebhook(ctx context.Context, report *core.InvestigationReport, caseID int64) {
+	store, _ := config.NewDefaultStore()
+	webhookURL := o.webhookURL
+	if webhookURL == "" {
+		webhookURL = resolveConfig(store, "PHONEACCESS_WEBHOOK_URL")
+	}
+	if webhookURL == "" {
+		return
+	}
+	secret := resolveConfig(store, "PHONEACCESS_WEBHOOK_SECRET")
+	// When --webhook flag is set explicitly, deliver regardless of risk band.
+	// The risk minimum only applies to config-driven webhook URLs.
+	var riskMin core.RiskBand
+	if o.webhookURL != "" {
+		riskMin = core.RiskBandLow
+	} else {
+		riskMinStr := resolveConfig(store, "PHONEACCESS_WEBHOOK_RISK_MIN")
+		riskMin = core.RiskBand(strings.ToUpper(strings.TrimSpace(riskMinStr)))
+		switch riskMin {
+		case core.RiskBandLow, core.RiskBandModerate, core.RiskBandHigh, core.RiskBandCritical:
+			// valid
+		default:
+			riskMin = core.RiskBandHigh
+		}
+	}
+	cfg := exporters.WebhookConfig{URL: webhookURL, Secret: secret, RiskMin: riskMin}
+	if err := exporters.DeliverWebhook(ctx, cfg, report, caseID); err != nil {
+		fmt.Fprintf(os.Stderr, "webhook warning: %v\n", err)
+	}
+}
+
 func (o *options) resolveFormat() (string, error) {
+	// Boolean shorthand flags take precedence over --format.
+	if o.compact {
+		return "compact", nil
+	}
+	if o.field {
+		return "field", nil
+	}
+
 	format := strings.ToLower(strings.TrimSpace(o.format))
 	if format == "" {
 		format = "terminal"
 	}
+
+	// compact/field can also be set via --format compact / --format field.
+	if format == "compact" || format == "field" {
+		return format, nil
+	}
+
 	if o.output != "" {
 		if ext := exporters.FormatFromPath(o.output); ext != "" {
 			if !exporters.Supported(ext) {
@@ -297,7 +421,7 @@ func (o *options) resolveFormat() (string, error) {
 		}
 		return format, nil
 	default:
-		return "", fmt.Errorf("unsupported format %q; use terminal, json, csv, txt, pdf, gexf, or jsonld", o.format)
+		return "", fmt.Errorf("unsupported format %q; use terminal, json, csv, txt, pdf, gexf, jsonld, compact, or field", o.format)
 	}
 }
 
@@ -346,6 +470,15 @@ func (o *options) saveInvestigationToDB(report *core.InvestigationReport, stdout
 	if err != nil {
 		return 0, err
 	}
+
+	// Persist profile photo pHash for cross-session matching.
+	if report.ImageIntelligence != nil && strings.TrimSpace(report.ImageIntelligence.PhotoPHash) != "" {
+		_ = s.StorePhotoHash(id, e164,
+			report.ImageIntelligence.PhotoSource,
+			report.ImageIntelligence.PhotoPHash,
+			report.ImageIntelligence.PhotoPath)
+	}
+
 	if printMatches && len(matches) > 0 && o.format == "terminal" {
 		fmt.Fprintln(stdout, "\nPRIOR INVESTIGATIONS")
 		for _, m := range matches {
@@ -420,10 +553,18 @@ func (o *options) runAutoPivot(ctx context.Context, report *core.InvestigationRe
 }
 
 func (o *options) writeReport(report *core.InvestigationReport, format string, stdout io.Writer) error {
-	if format == "terminal" {
-		_, err := io.WriteString(stdout, NewTerminalRenderer().Render(report))
+	switch format {
+	case "terminal":
+		_, err := io.WriteString(stdout, NewTerminalRenderer(o.minConfidence).Render(report))
+		return err
+	case "compact":
+		_, err := io.WriteString(stdout, NewCompactRenderer().Render(report))
+		return err
+	case "field":
+		_, err := io.WriteString(stdout, NewFieldRenderer().Render(report))
 		return err
 	}
+
 	if format == "pdf" && o.output == "" {
 		_, err := io.WriteString(stdout, "PDF export requires an output file; use -o report.pdf\n")
 		return err
@@ -432,7 +573,7 @@ func (o *options) writeReport(report *core.InvestigationReport, format string, s
 	var exporter exporters.Exporter
 	var err error
 	if format == "txt" {
-		exporter = exporters.NewTextExporter(NewTerminalRenderer().Render)
+		exporter = exporters.NewTextExporter(NewTerminalRenderer(o.minConfidence).Render)
 	} else {
 		exporter, err = exporters.New(format)
 		if err != nil {
@@ -514,13 +655,44 @@ func (o *options) runBatch(ctx context.Context, stdout io.Writer, path string, n
 	if err != nil {
 		return err
 	}
+
+	if err := resolveAndApplyProxy(ctx, o, stdout, selected); err != nil {
+		return err
+	}
+
+	if o.doh {
+		providerURL := core.ResolveDoHProviderURL(o.dohProvider)
+		if err := core.ApplyDoH(providerURL); err != nil {
+			return fmt.Errorf("apply DoH: %w", err)
+		}
+	}
+
+	if hasActiveModulesSelected(o, selected) && !o.yes {
+		if err := printOpsecWarning(stdout, buildOpsecState(o)); err != nil {
+			return err
+		}
+		ok, err := promptOpsecContinue(stdout, os.Stdin)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("aborted by user")
+		}
+	}
+
 	selectedNames := selectedModuleNames(o.moduleNames)
 	identitySelected := identityRecordSelected(o.moduleNames)
 
+	compactMode := o.compact || strings.ToLower(strings.TrimSpace(o.format)) == "compact"
+	fieldMode := o.field || strings.ToLower(strings.TrimSpace(o.format)) == "field"
+	quietMode := compactMode || fieldMode // suppress progress/summary in triage modes
+
 	reports := make([]*core.InvestigationReport, 0, len(numbers))
 	for i, raw := range numbers {
-		if _, err := fmt.Fprintf(stdout, "[%d/%d] Investigating %s...\n", i+1, len(numbers), raw); err != nil {
-			return err
+		if !quietMode {
+			if _, err := fmt.Fprintf(stdout, "[%d/%d] Investigating %s...\n", i+1, len(numbers), raw); err != nil {
+				return err
+			}
 		}
 		number, err := core.NormalizePhoneNumber(raw)
 		if err != nil {
@@ -542,6 +714,20 @@ func (o *options) runBatch(ctx context.Context, stdout io.Writer, path string, n
 			return fmt.Errorf("investigate %s: %w", raw, err)
 		}
 		reports = append(reports, report)
+
+		// Per-investigation output in triage modes.
+		if compactMode {
+			if _, err := io.WriteString(stdout, NewCompactRenderer().Render(report)); err != nil {
+				return err
+			}
+		} else if fieldMode {
+			if _, err := io.WriteString(stdout, NewFieldRenderer().Render(report)); err != nil {
+				return err
+			}
+		}
+
+		// Fire webhook per investigation (best-effort, not blocking).
+		o.fireWebhook(ctx, report, 0)
 	}
 
 	csvPath, jsonPath := batchOutputPaths(now())
@@ -550,6 +736,10 @@ func (o *options) runBatch(ctx context.Context, stdout io.Writer, path string, n
 	}
 	if err := writeBatchJSON(jsonPath, reports); err != nil {
 		return err
+	}
+
+	if quietMode {
+		return nil
 	}
 
 	if _, err := fmt.Fprintf(stdout, "\nWrote %s and %s\n\n", csvPath, jsonPath); err != nil {
@@ -854,6 +1044,8 @@ func moduleKeyNames(moduleName string) string {
 		return "OPENCNAM_SID, TRESTLE_API_KEY"
 	case "telegram":
 		return "TELEGRAM_APP_ID, TELEGRAM_APP_HASH"
+	case "intelligence":
+		return "OPENSANCTIONS_API_KEY"
 	default:
 		return "-"
 	}
@@ -874,6 +1066,7 @@ func apiKeyCatalog() []apiKeyInfo {
 		{Name: "NUMLOOKUP_API_KEY", Description: "NumLookup phone intelligence, 500 free/month, numlookupapi.com"},
 		{Name: "LEAKSIGHT_API_KEY", Description: "LeakSight breach enrichment, plan-based pricing, leaksight.com"},
 		{Name: "TRESTLE_API_KEY", Description: "Trestle IQ reverse lookup, paid/partner access, trestleiq.com"},
+		{Name: "HIBP_API_KEY", Description: "Have I Been Pwned breach intelligence API key ($3.50/month — haveibeenpwned.com/API/Key); most recognised breach database"},
 		{Name: "SNUSBASE_API_KEY", Description: "Snusbase breach intelligence API key"},
 		{Name: "BREACHDIRECTORY_API_KEY", Description: "BreachDirectory API key via RapidAPI"},
 		{Name: "LEAKLOOKUP_API_KEY", Description: "Leak-Lookup API key"},
@@ -893,7 +1086,24 @@ func apiKeyCatalog() []apiKeyInfo {
 		{Name: "TRUECALLER_INSTALLATION_ID", Description: "Truecaller unofficial session token; unsupported and operator-responsible, install/app: https://www.truecaller.com/download"},
 		{Name: "TELEGRAM_APP_ID", Description: "Telegram MTProto app ID from https://my.telegram.org/apps — required for Telegram account discovery"},
 		{Name: "TELEGRAM_APP_HASH", Description: "Telegram MTProto app hash from https://my.telegram.org/apps — required for Telegram account discovery"},
+		{Name: "PROXY_URL", Description: "Proxy URL for all requests (e.g. socks5://127.0.0.1:9050, http://user:pass@host:port) — equivalent to --proxy flag"},
+		{Name: "TOR_ENABLED", Description: "Set to true to route all requests through Tor (127.0.0.1:9050) — equivalent to --tor flag"},
+		{Name: "TOR_ADDRESS", Description: "Custom Tor SOCKS5 address (default: 127.0.0.1:9050) — equivalent to --tor-address flag"},
+		{Name: "VIRUSTOTAL_API_KEY", Description: "VirusTotal API key for phone-number threat intelligence cross-reference (free tier: 500 req/day — virustotal.com)"},
+		{Name: "OPENSANCTIONS_API_KEY", Description: "OpenSanctions API key for higher-rate-limit access to the match endpoint (10,000 req/month free — opensanctions.org/api). Search endpoint always runs without a key."},
 		{Name: "PHONEACCESS_FINANCE_VENMO", Description: "Set to 'allow' to enable Venmo phone-to-name resolution (opt-in, 50-lookup cap, 6 s inter-request delay)"},
+		{Name: "PHONEACCESS_USER_AGENT", Description: "Custom User-Agent string used when --ua-mode=custom (or when --user-agent flag is set)"},
+		{Name: "PHONEACCESS_UA_MODE", Description: "UA rotation mode: fixed (default, one consistent UA per run), random (new UA per request), custom (use PHONEACCESS_USER_AGENT)"},
+		{Name: "SESSION_KEY_SOURCE", Description: "Session file encryption key source: machine (default, transparent), passphrase (PBKDF2 from user passphrase), both (PBKDF2 from passphrase + machine ID)"},
+		{Name: "PHONEACCESS_DOH_ENABLED", Description: "Set to true to enable DNS-over-HTTPS on every run (equivalent to --doh flag)"},
+		{Name: "PHONEACCESS_DOH_PROVIDER", Description: "DoH provider: cloudflare (default), google, quad9, or a custom URL (equivalent to --doh-provider flag)"},
+		{Name: "TINEYE_API_KEY", Description: "TinEye reverse image search API key, 100 searches/month free — tineye.com/api"},
+		{Name: "PHASH_HAMMING_THRESHOLD", Description: "Maximum Hamming distance for cross-session pHash match (default: 10; lower = stricter)"},
+		{Name: "PHONEACCESS_MIN_CONFIDENCE", Description: "Default minimum confidence threshold for terminal display (0.0–1.0); findings below this are hidden from terminal but always present in JSON"},
+		{Name: "PHONEACCESS_COMPACT", Description: "Set to true to use compact triage output (≤6 lines) as the persistent default (equivalent to --compact flag)"},
+		{Name: "PHONEACCESS_WEBHOOK_URL", Description: "Webhook endpoint URL; supports generic HTTP, Slack incoming webhooks, and Discord (discord.com/api/webhooks — auto-detected)"},
+		{Name: "PHONEACCESS_WEBHOOK_SECRET", Description: "HMAC-SHA256 signing secret for webhook payloads; if set, adds X-PhoneAccess-Signature header so the receiver can verify authenticity"},
+		{Name: "PHONEACCESS_WEBHOOK_RISK_MIN", Description: "Minimum risk band to trigger webhook notification: LOW, MODERATE, HIGH, or CRITICAL (default: HIGH)"},
 	}
 }
 
@@ -991,6 +1201,7 @@ func addMessengerIdentityClaims(record *correlator.UnifiedIdentityRecord, report
 	}
 	add("Telegram", report.Messenger.Telegram)
 	add("WhatsApp", report.Messenger.WhatsApp)
+	add("Signal", report.Messenger.Signal)
 }
 
 func addTruecallerIdentityRecord(record *correlator.UnifiedIdentityRecord, report *core.InvestigationReport) {
@@ -1183,4 +1394,185 @@ func cliFirstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (m skippedModule) ProxyAware() bool { return true }
+
+func resolveConfig(store *config.Store, key string) string {
+	if store != nil {
+		if cfg, err := store.Load(); err == nil {
+			if val, ok := cfg.APIKeys[key]; ok && val != "" {
+				return val
+			}
+		}
+	}
+	return os.Getenv(key)
+}
+
+func resolveAndInitUA(opts *options, store *config.Store) {
+	uaMode := opts.uaMode
+	customUA := opts.userAgent
+
+	// --user-agent flag implies custom mode.
+	if customUA != "" && uaMode == "" {
+		uaMode = string(core.UAModeCustom)
+	}
+
+	// Fall back to config keys when flags are empty.
+	if customUA == "" {
+		customUA = resolveConfig(store, "PHONEACCESS_USER_AGENT")
+	}
+	if uaMode == "" {
+		uaMode = resolveConfig(store, "PHONEACCESS_UA_MODE")
+	}
+
+	// --user-agent flag always wins over config key.
+	if opts.userAgent != "" {
+		customUA = opts.userAgent
+		uaMode = string(core.UAModeCustom)
+	}
+
+	var mode core.UAMode
+	switch core.UAMode(uaMode) {
+	case core.UAModeRandom:
+		mode = core.UAModeRandom
+	case core.UAModeCustom:
+		mode = core.UAModeCustom
+	default:
+		mode = core.UAModeFixed
+	}
+
+	core.InitGlobalPool(mode, customUA)
+}
+
+func resolveMinConfidenceConfig(opts *options, store *config.Store) {
+	if opts.minConfidence > 0 {
+		return // flag takes precedence
+	}
+	if val := resolveConfig(store, "PHONEACCESS_MIN_CONFIDENCE"); val != "" {
+		if f, err := strconv.ParseFloat(val, 64); err == nil && f > 0 {
+			opts.minConfidence = f
+		}
+	}
+}
+
+func resolveDoHConfig(opts *options, store *config.Store) {
+	if !opts.doh {
+		if strings.ToLower(resolveConfig(store, "PHONEACCESS_DOH_ENABLED")) == "true" {
+			opts.doh = true
+		}
+	}
+	if opts.dohProvider == "" || opts.dohProvider == "cloudflare" {
+		if p := resolveConfig(store, "PHONEACCESS_DOH_PROVIDER"); p != "" {
+			opts.dohProvider = p
+		}
+	}
+}
+
+func resolveCompactModeConfig(opts *options, store *config.Store) {
+	if opts.compact || opts.field {
+		return // flag takes precedence
+	}
+	if strings.ToLower(resolveConfig(store, "PHONEACCESS_COMPACT")) == "true" {
+		opts.compact = true
+	}
+}
+
+func resolveAndApplyProxy(ctx context.Context, opts *options, stdout io.Writer, registry []core.Module) error {
+	store, _ := config.NewDefaultStore()
+	resolveAndInitUA(opts, store)
+	resolveDoHConfig(opts, store)
+	resolveMinConfidenceConfig(opts, store)
+	resolveCompactModeConfig(opts, store)
+	
+	proxyURLStr := opts.proxyURL
+	if proxyURLStr == "" {
+		proxyURLStr = resolveConfig(store, "PROXY_URL")
+	}
+
+	torEnabled := opts.tor
+	if !torEnabled {
+		if strings.ToLower(resolveConfig(store, "TOR_ENABLED")) == "true" {
+			torEnabled = true
+		}
+	}
+
+	torAddress := opts.torAddress
+	if torAddress == "" {
+		torAddress = resolveConfig(store, "TOR_ADDRESS")
+	}
+
+	cfg := core.ProxyConfig{}
+	if torEnabled {
+		cfg.Enabled = true
+		cfg.Type = "tor"
+		cfg.Address = torAddress
+	} else if proxyURLStr != "" {
+		cfg.Enabled = true
+		u, err := url.Parse(proxyURLStr)
+		if err == nil {
+			cfg.Type = u.Scheme
+			cfg.Address = u.Host
+			if u.User != nil {
+				cfg.Username = u.User.Username()
+				cfg.Password, _ = u.User.Password()
+			}
+		} else {
+			cfg.Type = "http"
+			cfg.Address = proxyURLStr
+		}
+	}
+
+	if cfg.Enabled {
+		if err := core.ApplyGlobalProxy(cfg); err != nil {
+			return fmt.Errorf("failed to apply proxy config: %w", err)
+		}
+
+		// Pre-flight check: verify the proxy is reachable
+		if !(cfg.Type == "tor" && opts.torSkipCheck) {
+			proxyHost := cfg.Address
+			if cfg.Type == "tor" && proxyHost == "" {
+				proxyHost = "127.0.0.1:9050"
+			}
+			if cfg.Type == "http" {
+				if u, err := url.Parse(proxyURLStr); err == nil {
+					proxyHost = u.Host
+				}
+			}
+			conn, err := net.DialTimeout("tcp", proxyHost, 5*time.Second)
+			if err != nil {
+				if cfg.Type == "tor" {
+					fmt.Fprintln(stdout, "\033[31m✗ Tor not detected. Is Tor running?\033[0m")
+					return errors.New("tor check failed: connection refused")
+				}
+				return fmt.Errorf("proxy connection failed: %w", err)
+			}
+			conn.Close()
+		}
+
+		if cfg.Type == "tor" && !opts.torSkipCheck {
+			fmt.Fprint(stdout, "Checking Tor connectivity... ")
+			client := core.NewHTTPClient(10 * time.Second)
+			req, _ := http.NewRequestWithContext(ctx, "GET", "https://check.torproject.org/api/ip", nil)
+			resp, err := client.Do(req)
+			if err != nil {
+				fmt.Fprintln(stdout, "\033[31m✗ Tor not detected. Is Tor running?\033[0m")
+				return fmt.Errorf("tor check failed: %w", err)
+			}
+			defer resp.Body.Close()
+			var result struct { IsTor bool `json:"IsTor"` }
+			if err := json.NewDecoder(resp.Body).Decode(&result); err != nil || !result.IsTor {
+				fmt.Fprintln(stdout, "\033[31m✗ Tor not detected. Is Tor running?\033[0m")
+				return errors.New("tor check failed: not tor")
+			}
+			fmt.Fprintln(stdout, "\033[32m✓ Tor circuit established\033[0m")
+		}
+
+		for _, m := range registry {
+			if !m.ProxyAware() {
+				fmt.Fprintf(stdout, "⚠ %s module does not route through proxy — direct connection will be used.\n", m.Name())
+			}
+		}
+	}
+	return nil
 }

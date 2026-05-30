@@ -2715,3 +2715,5 @@ func allServices() []Service {
 		},
 	}
 }
+
+func (m *Module) ProxyAware() bool { return true }

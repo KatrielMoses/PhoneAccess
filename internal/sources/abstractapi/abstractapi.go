@@ -146,3 +146,5 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+func (s *Source) ProxyAware() bool { return true }

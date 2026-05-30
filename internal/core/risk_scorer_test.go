@@ -123,6 +123,38 @@ func TestRiskScorerAllHitReportScoresNearMaximum(t *testing.T) {
 	}
 }
 
+func TestSignalRegisteredContributesToFootprintRisk(t *testing.T) {
+	report := riskReport(
+		result("signal", map[string]string{"found": "true", "data_source": "signal_cdn"}),
+	)
+
+	score := ScoreRisk(report)
+
+	var footprintPoints int
+	for _, d := range score.Drivers {
+		if d.Label == "messaging or social footprint" {
+			footprintPoints = d.Points
+		}
+	}
+	if footprintPoints == 0 {
+		t.Fatalf("footprint points = 0; Signal registration should contribute to footprint risk")
+	}
+}
+
+func TestSignalNotFoundDoesNotContributeToFootprintRisk(t *testing.T) {
+	report := riskReport(
+		result("signal", map[string]string{"found": "false", "data_source": "signal_cdn"}),
+	)
+
+	score := ScoreRisk(report)
+
+	for _, d := range score.Drivers {
+		if d.Label == "messaging or social footprint" && d.Points > 0 {
+			t.Fatalf("footprint driver has points %d; Signal not-found should not contribute", d.Points)
+		}
+	}
+}
+
 func riskReport(results ...*ModuleResult) *InvestigationReport {
 	report := &InvestigationReport{Results: results}
 	report.IdentityGraph = BuildIdentityGraph(report)

@@ -62,7 +62,24 @@ func newCasesCommand() *cobra.Command {
 			if err := json.Unmarshal([]byte(reportJSON), &report); err != nil {
 				return err
 			}
-			fmt.Fprint(cmd.OutOrStdout(), NewTerminalRenderer().Render(&report))
+			out := cmd.OutOrStdout()
+			fmt.Fprint(out, NewTerminalRenderer().Render(&report))
+
+			children, err := s.ListChildInvestigations(id)
+			if err == nil && len(children) > 0 {
+				tw := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(tw, "\nLINKED PIVOTS")
+				fmt.Fprintln(tw, "ID\tArtifact\tType\tRisk Band\tDate")
+				for _, c := range children {
+					artifact := c.PhoneE164
+					if c.PivotValue != "" {
+						artifact = c.PivotValue
+					}
+					fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n",
+						c.ID, artifact, c.PivotType, c.RiskBand, c.CreatedAt.Format("2006-01-02 15:04"))
+				}
+				tw.Flush()
+			}
 			return nil
 		},
 	})

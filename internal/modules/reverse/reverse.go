@@ -1022,3 +1022,13 @@ func confidenceRank(value string) int {
 		return 0
 	}
 }
+
+func (m *Module) ProxyAware() bool { return true }
+
+func (truecallerSource) ProxyAware() bool { return true }
+
+func (googleDorkSource) ProxyAware() bool { return true }
+
+func (zabaSearchSource) ProxyAware() bool { return true }
+
+func (s openCNAMSource) ProxyAware() bool { return true }

@@ -181,10 +181,7 @@ func (c liveClient) Setup(ctx context.Context, stdout io.Writer) error {
 	fmt.Fprintln(stdout, "WhatsApp setup")
 	fmt.Fprintln(stdout, "Scan the QR code printed by a whatsmeow-enabled build to link your own account.")
 	fmt.Fprintln(stdout, disclaimer)
-	if err := os.MkdirAll(filepath.Dir(c.sessionPath()), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(c.sessionPath(), []byte("placeholder session\n"), 0o600)
+	return core.EncryptSession(c.sessionPath(), []byte("placeholder session\n"))
 }
 
 func jidForNumber(number *core.PhoneNumber) string {
@@ -203,3 +200,5 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+func (m *Module) ProxyAware() bool { return false }

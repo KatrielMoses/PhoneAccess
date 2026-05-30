@@ -244,8 +244,7 @@ func (c liveClient) Setup(ctx context.Context, stdin io.Reader, stdout io.Writer
 		scanner := bufio.NewScanner(stdin)
 		_ = scanner.Scan()
 	}
-	if err := os.MkdirAll(filepath.Dir(c.sessionPath()), 0o700); err != nil {
-		return err
-	}
-	return os.WriteFile(c.sessionPath(), []byte("{}\n"), 0o600)
+	return core.EncryptSession(c.sessionPath(), []byte("{}\n"))
 }
+
+func (m *Module) ProxyAware() bool { return false }

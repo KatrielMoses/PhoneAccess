@@ -20,9 +20,11 @@ func BuildMessengerReport(results []*ModuleResult) *MessengerReport {
 			report.Telegram = account
 		case "whatsapp":
 			report.WhatsApp = account
+		case "signal":
+			report.Signal = account
 		}
 	}
-	if report.Telegram == nil && report.WhatsApp == nil {
+	if report.Telegram == nil && report.WhatsApp == nil && report.Signal == nil {
 		return nil
 	}
 	return report

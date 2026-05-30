@@ -502,3 +502,5 @@ func joinStatuses(statuses map[string]string) string {
 	}
 	return strings.Join(parts, "; ")
 }
+
+func (m *Module) ProxyAware() bool { return true }

@@ -113,3 +113,5 @@ func parseName(body []byte) string {
 	}
 	return ""
 }
+
+func (s *Source) ProxyAware() bool { return true }

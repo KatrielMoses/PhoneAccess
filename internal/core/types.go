@@ -6,6 +6,49 @@ import (
 	"time"
 )
 
+// PostMessengerModule is implemented by modules that need the completed MessengerReport.
+// The engine runs these after all parallel modules finish and BuildMessengerReport completes.
+type PostMessengerModule interface {
+	RunPostMessenger(ctx context.Context, number *PhoneNumber, report *InvestigationReport) (*ModuleResult, error)
+}
+
+type ImageIntelResult struct {
+	PhotoPath        string             `json:"photo_path,omitempty"`
+	PhotoSource      string             `json:"photo_source,omitempty"`
+	PhotoPHash       string             `json:"photo_phash,omitempty"`
+	TinEye           TinEyeResult       `json:"tineye"`
+	ReverseURLs      ReverseSearchURLs  `json:"reverse_urls"`
+	CrossSessionHits []CrossSessionMatch `json:"cross_session_hits,omitempty"`
+}
+
+type TinEyeResult struct {
+	MatchCount int           `json:"match_count"`
+	Matches    []TinEyeMatch `json:"matches,omitempty"`
+}
+
+type TinEyeMatch struct {
+	Domain    string    `json:"domain"`
+	URL       string    `json:"url"`
+	CrawlDate time.Time `json:"crawl_date"`
+	ImageURL  string    `json:"image_url,omitempty"`
+	Score     float64   `json:"score,omitempty"`
+}
+
+type ReverseSearchURLs struct {
+	GoogleLens string `json:"google_lens,omitempty"`
+	Yandex     string `json:"yandex,omitempty"`
+	Bing       string `json:"bing,omitempty"`
+	TinEyeWeb  string `json:"tineye_web,omitempty"`
+}
+
+type CrossSessionMatch struct {
+	CaseID      int64     `json:"case_id"`
+	PhoneE164   string    `json:"phone_e164"`
+	CaseName    string    `json:"case_name,omitempty"`
+	HammingDist int       `json:"hamming_dist"`
+	FoundAt     time.Time `json:"found_at"`
+}
+
 type LineType string
 
 const (
@@ -92,6 +135,7 @@ type Module interface {
 	Description() string
 	RequiresAPIKey() bool
 	Tier() ModuleTier
+	ProxyAware() bool
 	DryRun(ctx context.Context, number *PhoneNumber) error
 	Run(ctx context.Context, number *PhoneNumber) (*ModuleResult, error)
 }
@@ -103,6 +147,7 @@ type PassiveModule interface {
 type MessengerReport struct {
 	Telegram *MessengerAccount `json:"telegram,omitempty"`
 	WhatsApp *MessengerAccount `json:"whatsapp,omitempty"`
+	Signal   *MessengerAccount `json:"signal,omitempty"`
 }
 
 type MessengerAccount struct {
@@ -119,16 +164,17 @@ type MessengerAccount struct {
 }
 
 type InvestigationReport struct {
-	GeneratedAt    time.Time        `json:"generated_at"`
-	Passive        bool             `json:"passive"`
-	Number         *PhoneNumber     `json:"number"`
-	Results        []*ModuleResult  `json:"results"`
-	Messenger      *MessengerReport `json:"messenger,omitempty"`
-	IdentityGraph  *IdentityGraph   `json:"identity_graph,omitempty"`
-	PivotChain     *PivotChainNode  `json:"pivot_chain,omitempty"`
-	Timeline       *Timeline        `json:"timeline,omitempty"`
-	IdentityRecord any              `json:"identity_record,omitempty"`
-	RiskScore      *RiskScore       `json:"risk_score,omitempty"`
+	GeneratedAt      time.Time         `json:"generated_at"`
+	Passive          bool              `json:"passive"`
+	Number           *PhoneNumber      `json:"number"`
+	Results          []*ModuleResult   `json:"results"`
+	Messenger        *MessengerReport  `json:"messenger,omitempty"`
+	ImageIntelligence *ImageIntelResult `json:"image_intelligence,omitempty"`
+	IdentityGraph    *IdentityGraph    `json:"identity_graph,omitempty"`
+	PivotChain       *PivotChainNode   `json:"pivot_chain,omitempty"`
+	Timeline         *Timeline         `json:"timeline,omitempty"`
+	IdentityRecord   any               `json:"identity_record,omitempty"`
+	RiskScore        *RiskScore        `json:"risk_score,omitempty"`
 }
 
 func (r *InvestigationReport) MarshalJSON() ([]byte, error) {

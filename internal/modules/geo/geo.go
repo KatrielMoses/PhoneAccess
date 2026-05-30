@@ -326,3 +326,5 @@ func firstNonEmpty(values ...string) string {
 	}
 	return ""
 }
+
+func (m *Module) ProxyAware() bool { return true }

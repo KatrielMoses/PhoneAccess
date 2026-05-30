@@ -271,3 +271,11 @@ func (scyllaSource) Parse(body []byte) SourceResult {
 		Breaches: breaches,
 	}
 }
+
+func (snusbaseSource) ProxyAware() bool { return true }
+
+func (breachDirectorySource) ProxyAware() bool { return true }
+
+func (leakLookupSource) ProxyAware() bool { return true }
+
+func (scyllaSource) ProxyAware() bool { return true }

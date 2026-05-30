@@ -22,6 +22,10 @@ func ScoreRisk(report *InvestigationReport) *RiskScore {
 		financeRisk(report),
 		identityRisk(report),
 		geoRisk(report),
+		vtRisk(report),
+		malwareBazaarRisk(report),
+		sanctionsRisk(report),
+		mediaRisk(report),
 	}
 
 	total := 0
@@ -117,8 +121,13 @@ func footprintRisk(report *InvestigationReport) RiskDriver {
 		}
 	}
 
+	// Explicit Signal handling: registration is a confirmed messenger footprint.
+	if truthy(finding(report, "signal", "found")) {
+		accounts["signal:registered"] = true
+	}
+
 	points := clampInt(len(accounts)*5, 0, 15)
-	
+
 	enumeratorHits := atoi(finding(report, "enumerator", "hit_count"))
 	if enumeratorHits > 0 {
 		enumPoints := int(math.Round(float64(enumeratorHits) * 15.0 / 50.0))
@@ -231,6 +240,46 @@ func financeRisk(report *InvestigationReport) RiskDriver {
 		points += 5
 	}
 	return RiskDriver{Label: "financial platform presence", Points: clampInt(points, 0, 15)}
+}
+
+func vtRisk(report *InvestigationReport) RiskDriver {
+	hits := atoi(finding(report, "infrastructure", "vt_hit_count"))
+	if hits > 0 {
+		return RiskDriver{Label: "VirusTotal threat association", Points: 15}
+	}
+	return RiskDriver{Label: "VirusTotal threat association", Points: 0}
+}
+
+func malwareBazaarRisk(report *InvestigationReport) RiskDriver {
+	hits := atoi(finding(report, "infrastructure", "malware_sample_count"))
+	if hits > 0 {
+		return RiskDriver{Label: "Number found in malware sample", Points: 20}
+	}
+	return RiskDriver{Label: "Number found in malware sample", Points: 0}
+}
+
+func sanctionsRisk(report *InvestigationReport) RiskDriver {
+	hitCount := atoi(finding(report, "intelligence", "sanctions_hit_count"))
+	highRisk := truthy(finding(report, "intelligence", "sanctions_high_risk"))
+	if highRisk {
+		return RiskDriver{Label: "Sanctions list match", Points: 40}
+	}
+	if hitCount > 0 {
+		return RiskDriver{Label: "Possible sanctions association", Points: 20}
+	}
+	return RiskDriver{Label: "Sanctions list match", Points: 0}
+}
+
+func mediaRisk(report *InvestigationReport) RiskDriver {
+	count := atoi(finding(report, "intelligence", "media_article_count"))
+	switch {
+	case count >= 3:
+		return RiskDriver{Label: "Adverse media coverage", Points: 20}
+	case count >= 1:
+		return RiskDriver{Label: "Adverse media coverage", Points: 10}
+	default:
+		return RiskDriver{Label: "Adverse media coverage", Points: 0}
+	}
 }
 
 func topRiskDrivers(drivers []RiskDriver, limit int) []RiskDriver {

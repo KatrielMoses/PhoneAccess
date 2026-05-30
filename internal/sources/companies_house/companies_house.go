@@ -158,3 +158,5 @@ func (a address) String() string {
 	}
 	return strings.Join(out, ", ")
 }
+
+func (s *Source) ProxyAware() bool { return true }

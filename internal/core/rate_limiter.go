@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"math/rand"
 	"sync"
 	"time"
 )
@@ -22,15 +23,27 @@ func NewRateLimiter(delay time.Duration) *RateLimiter {
 	}
 }
 
+// jitter applies ±30% random variance to base, keeping the result positive.
+func jitter(base time.Duration) time.Duration {
+	factor := 0.7 + rand.Float64()*0.6 // 0.70 to 1.30
+	d := time.Duration(float64(base) * factor)
+	if d <= 0 {
+		return base
+	}
+	return d
+}
+
 func (r *RateLimiter) Wait(ctx context.Context, key string) error {
 	if r == nil || r.delay == 0 || key == "" {
 		return nil
 	}
 
+	effectiveDelay := jitter(r.delay)
+
 	for {
 		r.mu.Lock()
 		now := time.Now()
-		wait := r.delay - now.Sub(r.lastSeen[key])
+		wait := effectiveDelay - now.Sub(r.lastSeen[key])
 		if wait <= 0 {
 			r.lastSeen[key] = now
 			r.mu.Unlock()

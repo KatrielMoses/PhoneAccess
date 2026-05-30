@@ -1129,3 +1129,5 @@ func onlyDigits(value string) string {
 	}
 	return b.String()
 }
+
+func (m *Module) ProxyAware() bool { return true }

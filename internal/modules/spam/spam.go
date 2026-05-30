@@ -379,3 +379,5 @@ func riskLabel(score int) string {
 		return "CRITICAL"
 	}
 }
+
+func (m *Module) ProxyAware() bool { return true }

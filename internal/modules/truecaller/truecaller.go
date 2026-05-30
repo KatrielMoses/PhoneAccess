@@ -535,3 +535,5 @@ type truecallerAddress struct {
 	CountryCode string `json:"countryCode"`
 	TimeZone    string `json:"timeZone"`
 }
+
+func (m *Module) ProxyAware() bool { return true }

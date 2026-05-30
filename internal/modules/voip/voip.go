@@ -472,3 +472,5 @@ type abstractAPIResponse struct {
 		Name string `json:"name"`
 	} `json:"country"`
 }
+
+func (m *Module) ProxyAware() bool { return true }

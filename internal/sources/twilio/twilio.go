@@ -254,3 +254,5 @@ type twilioResponse struct {
 		CallerType string `json:"caller_type"`
 	} `json:"caller_name"`
 }
+
+func (s *Source) ProxyAware() bool { return true }

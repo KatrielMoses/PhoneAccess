@@ -30,6 +30,14 @@ type Source interface {
 	Parse(body []byte) SourceResult
 }
 
+// SourceQuerier is an optional interface for sources that need full control of
+// the HTTP pipeline (custom rate limits, retry logic, status-code handling).
+// When implemented, querySource delegates entirely to Query instead of its
+// default GET+Parse pipeline.
+type SourceQuerier interface {
+	Query(ctx context.Context, client HTTPClient, number *core.PhoneNumber) SourceResult
+}
+
 type Module struct {
 	httpClient HTTPClient
 	limiter    *core.RateLimiter
@@ -85,6 +93,7 @@ func New(opts ...Option) *Module {
 			breachDirectorySource{},
 			leakLookupSource{},
 			scyllaSource{},
+			&hibpSource{},
 		},
 	}
 	for _, opt := range opts {
@@ -188,6 +197,18 @@ func (m *Module) querySource(ctx context.Context, source Source, number *core.Ph
 	}
 
 	ctx = core.WithPhoneNumber(ctx, number)
+
+	// Sources that manage their own HTTP bypass the default pipeline.
+	if sq, ok := source.(SourceQuerier); ok {
+		r := sq.Query(ctx, m.httpClient, number)
+		r.Source = source.Name()
+		for i := range r.Breaches {
+			if r.Breaches[i].SourceAPI == "" {
+				r.Breaches[i].SourceAPI = source.Name()
+			}
+		}
+		return r
+	}
 
 	endpoint := source.URL(number)
 	parsed, err := url.Parse(endpoint)
@@ -997,3 +1018,11 @@ func maxInt(values ...int) int {
 	}
 	return best
 }
+
+func (m *Module) ProxyAware() bool { return true }
+
+func (xposedOrNotSource) ProxyAware() bool { return true }
+
+func (leakCheckSource) ProxyAware() bool { return true }
+
+func (hudsonRockSource) ProxyAware() bool { return true }

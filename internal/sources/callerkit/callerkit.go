@@ -118,3 +118,5 @@ func supported(e164 string) bool {
 	}
 	return false
 }
+
+func (s *Source) ProxyAware() bool { return true }

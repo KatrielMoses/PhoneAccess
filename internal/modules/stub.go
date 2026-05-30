@@ -51,3 +51,5 @@ func (m *StubModule) Run(ctx context.Context, number *core.PhoneNumber) (*core.M
 		Evidence:   []string{"Phase 1 does not perform OSINT network calls."},
 	}, nil
 }
+
+func (m *StubModule) ProxyAware() bool { return true }

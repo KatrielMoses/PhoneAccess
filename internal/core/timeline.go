@@ -117,6 +117,8 @@ func collectTimelineFromModule(result *ModuleResult, report *InvestigationReport
 		collectPasteTimeline(result.Data, add)
 	case "reverse":
 		collectReverseTimeline(result.Data, add)
+	case "intelligence":
+		collectIntelligenceTimeline(result.Data, add)
 	}
 }
 
@@ -255,6 +257,36 @@ func collectReverseTimeline(data any, add func(date, source, eventType, descript
 	for _, hit := range payload.Wayback {
 		desc := firstNonEmptyTimeline(hit.URL, hit.Source, "Wayback CDX listing confirmation")
 		add(hit.FirstSeen, firstNonEmptyTimeline(hit.Source, "wayback"), "wayback_index", desc, "low")
+	}
+}
+
+func collectIntelligenceTimeline(data any, add func(date, source, eventType, description, confidence string)) {
+	var payload struct {
+		Media struct {
+			Articles []struct {
+				Title       string `json:"title"`
+				URL         string `json:"url"`
+				Source      string `json:"source"`
+				PublishedAt string `json:"published_at"`
+			} `json:"articles"`
+		} `json:"media"`
+	}
+	if !decodeTimelineData(data, &payload) {
+		return
+	}
+	for _, article := range payload.Media.Articles {
+		date := article.PublishedAt
+		// Truncate RFC3339 timestamp to date portion.
+		if len(date) > 10 {
+			date = date[:10]
+		}
+		// Skip zero times and empty dates.
+		if date == "" || strings.HasPrefix(date, "0001-") {
+			continue
+		}
+		source := firstNonEmptyTimeline(article.Source, "news")
+		desc := firstNonEmptyTimeline(article.Title, article.URL, "media article")
+		add(date, source, "media_mention", desc, "medium")
 	}
 }
 

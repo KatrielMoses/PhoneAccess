@@ -109,6 +109,20 @@ func (e *Engine) Run(ctx context.Context, number *PhoneNumber) (*InvestigationRe
 	}
 	mergeTruecallerSpamFindings(report.Results)
 	report.Messenger = BuildMessengerReport(results)
+
+	// Second pass: modules that depend on the completed MessengerReport.
+	for i, module := range e.modules {
+		pmm, ok := module.(PostMessengerModule)
+		if !ok {
+			continue
+		}
+		if results[i] != nil && results[i].Status == ModuleStatusGated {
+			continue
+		}
+		results[i] = e.runPostMessengerModule(groupCtx, module.Name(), pmm, number, report)
+	}
+	report.ImageIntelligence = extractImageIntelResult(results)
+
 	report.IdentityGraph = BuildIdentityGraph(report)
 	report.Timeline = BuildTimeline(report)
 	if e.identityBuilder != nil {
@@ -181,6 +195,51 @@ func (e *Engine) runModule(ctx context.Context, module Module, number *PhoneNumb
 		result.Findings = map[string]string{}
 	}
 	return result
+}
+
+func (e *Engine) runPostMessengerModule(ctx context.Context, name string, pmm PostMessengerModule, number *PhoneNumber, report *InvestigationReport) (result *ModuleResult) {
+	moduleCtx, cancel := context.WithTimeout(ctx, e.timeout)
+	defer cancel()
+
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err := fmt.Errorf("panic: %v", recovered)
+			debugf("post-messenger module %s panicked: %v", name, recovered)
+			result = erroredModuleResult(name, err)
+		}
+	}()
+
+	result, err := pmm.RunPostMessenger(moduleCtx, number, report)
+	if err != nil {
+		return erroredModuleResult(name, err)
+	}
+	if result == nil {
+		return &ModuleResult{
+			ModuleName: name,
+			Status:     ModuleStatusSkipped,
+			Findings:   map[string]string{},
+			Evidence:   []string{"post-messenger module returned no result"},
+		}
+	}
+	if result.ModuleName == "" {
+		result.ModuleName = name
+	}
+	if result.Findings == nil {
+		result.Findings = map[string]string{}
+	}
+	return result
+}
+
+func extractImageIntelResult(results []*ModuleResult) *ImageIntelResult {
+	for _, result := range results {
+		if result == nil || result.ModuleName != "image_intelligence" || result.Data == nil {
+			continue
+		}
+		if ir, ok := result.Data.(*ImageIntelResult); ok {
+			return ir
+		}
+	}
+	return nil
 }
 
 func (e *Engine) isExplicitlySelected(name string) bool {

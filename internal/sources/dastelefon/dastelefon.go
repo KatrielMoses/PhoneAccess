@@ -135,3 +135,5 @@ func trim(value string) string {
 func national(e164, prefix string) string {
 	return strings.TrimPrefix(strings.TrimPrefix(e164, prefix), "+")
 }
+
+func (s *Source) ProxyAware() bool { return true }

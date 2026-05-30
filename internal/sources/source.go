@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/KatrielMoses/PhoneAccess/internal/config"
+	"github.com/KatrielMoses/PhoneAccess/internal/core"
 	"github.com/KatrielMoses/PhoneAccess/internal/correlator"
 )
 
@@ -51,10 +52,7 @@ type ResponseCache interface {
 
 type cacheContextKey struct{}
 
-const (
-	MaxBodyBytes = 2 * 1024 * 1024
-	UserAgent    = "PhoneAccess/0.1.0 (+https://github.com/KatrielMoses/PhoneAccess)"
-)
+const MaxBodyBytes = 2 * 1024 * 1024
 
 var ErrSkipped = errors.New("source skipped")
 
@@ -172,7 +170,7 @@ func Get(ctx context.Context, client HTTPClient, endpoint string, headers map[st
 }
 
 func SetDefaultHeaders(req *http.Request) {
-	req.Header.Set("User-Agent", UserAgent)
+	req.Header.Set("User-Agent", core.GetGlobalPool().GetUA())
 	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 }
 

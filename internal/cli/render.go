@@ -8,6 +8,8 @@ import (
 
 	"github.com/KatrielMoses/PhoneAccess/internal/core"
 	"github.com/KatrielMoses/PhoneAccess/internal/correlator"
+	"github.com/KatrielMoses/PhoneAccess/internal/modules/infrastructure"
+	"github.com/KatrielMoses/PhoneAccess/internal/modules/intelligence"
 	publicrecords "github.com/KatrielMoses/PhoneAccess/internal/modules/publicrecords"
 	"github.com/KatrielMoses/PhoneAccess/internal/modules/search"
 	"github.com/charmbracelet/lipgloss"
@@ -21,7 +23,11 @@ type TerminalRenderer struct {
 	blocks []RenderBlock
 }
 
-func NewTerminalRenderer() *TerminalRenderer {
+func NewTerminalRenderer(minConfidence ...float64) *TerminalRenderer {
+	threshold := 0.0
+	if len(minConfidence) > 0 && minConfidence[0] > 0 {
+		threshold = minConfidence[0]
+	}
 	return &TerminalRenderer{
 		blocks: []RenderBlock{
 			NumberIntelligenceBlock{},
@@ -34,11 +40,14 @@ func NewTerminalRenderer() *TerminalRenderer {
 			ReverseLookupBlock{},
 			TimelineBlock{},
 			MessengerPresenceBlock{},
+			PhotoIntelligenceBlock{},
 			ServiceEnumerationBlock{},
 			FinancialFootprintBlock{},
 			IdentityGraphBlock{},
 			PivotChainBlock{},
-			IdentityRecordBlock{},
+			IdentityRecordBlock{MinConfidence: threshold},
+			InfrastructureIntelligenceBlock{},
+			IntelligenceScreeningBlock{},
 			RiskScoreBlock{},
 		},
 	}
@@ -230,6 +239,15 @@ func (BreachIntelligenceBlock) Render(report *core.InvestigationReport) string {
 		rows = append(rows, cleanStyle.Render("\u2713 No public breach or stealer-log hits found."))
 	}
 
+	// Show a note when HIBP is not configured so users know the most recognised
+	// breach database was not queried.
+	for _, part := range strings.Split(findings["source_statuses"], "; ") {
+		if strings.HasPrefix(part, "HIBP=unavailable") {
+			rows = append(rows, valueStyle.Render("~ HIBP: HIBP_API_KEY not configured ($3.50/month \u2014 haveibeenpwned.com/API/Key)"))
+			break
+		}
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left, title, strings.Join(rows, "\n"))
 }
 
@@ -378,6 +396,100 @@ func (MessengerPresenceBlock) Render(report *core.InvestigationReport) string {
 	}
 	add("Telegram", moduleFindings(report, "telegram"))
 	add("WhatsApp", moduleFindings(report, "whatsapp"))
+
+	// Signal: registration-only check — use custom rendering (no profile details).
+	signalFindings := moduleFindings(report, "signal")
+	switch {
+	case len(signalFindings) == 0:
+		lines = append(lines, row("Signal", "~ check unavailable"))
+	case signalFindings["error"] != "":
+		lines = append(lines, row("Signal", "~ check unavailable"))
+	case strings.EqualFold(signalFindings["found"], "true"):
+		lines = append(lines, row("Signal", "✓ registered"))
+	default:
+		lines = append(lines, row("Signal", "— not registered"))
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, title, strings.Join(lines, "\n"))
+}
+
+type PhotoIntelligenceBlock struct{}
+
+func (PhotoIntelligenceBlock) Render(report *core.InvestigationReport) string {
+	title := sectionTitleStyle.Render("PHOTO INTELLIGENCE")
+
+	// Check for gated module result first.
+	raw := moduleResult(report, "image_intelligence")
+	if raw != nil && raw.Status == core.ModuleStatusGated {
+		return lipgloss.JoinVertical(lipgloss.Left, title, row("Status", "gated — use --active to enable"))
+	}
+
+	intel := report.ImageIntelligence
+	if intel == nil {
+		// Module ran but produced no photo (skipped).
+		if raw != nil && raw.Status == core.ModuleStatusSkipped {
+			reason := cliFirstNonEmpty(raw.Findings["reason"], "no profile photo retrieved")
+			return lipgloss.JoinVertical(lipgloss.Left, title,
+				row("Status", "No profile photo retrieved (WhatsApp/Telegram session required)"),
+				row("Note", empty(reason)))
+		}
+		return lipgloss.JoinVertical(lipgloss.Left, title,
+			row("Status", "No profile photo retrieved (WhatsApp/Telegram session required)"))
+	}
+
+	lines := []string{
+		row("Source", empty(intel.PhotoSource)+" profile photo"),
+		row("pHash", empty(intel.PhotoPHash)),
+	}
+
+	// TinEye results.
+	if intel.TinEye.MatchCount == 0 {
+		lines = append(lines, row("TinEye", "no reverse matches"))
+	} else {
+		lines = append(lines, row("TinEye", fmt.Sprintf("%d reverse match(es)", intel.TinEye.MatchCount)))
+		for _, m := range intel.TinEye.Matches {
+			date := ""
+			if !m.CrawlDate.IsZero() {
+				date = m.CrawlDate.Format("2006-01-02")
+			}
+			detail := m.Domain
+			if date != "" {
+				detail += " (" + date + ")"
+			}
+			lines = append(lines, valueStyle.Render("  → "+detail))
+		}
+	}
+
+	// Manual search URLs.
+	urls := intel.ReverseURLs
+	if urls.GoogleLens != "" || urls.Yandex != "" || urls.Bing != "" {
+		lines = append(lines, "")
+		lines = append(lines, labelStyle.Render("Manual search URLs:"))
+		if urls.GoogleLens != "" {
+			lines = append(lines, followupStyle.Render("Google Lens:  "+urls.GoogleLens))
+		}
+		if urls.Yandex != "" {
+			lines = append(lines, followupStyle.Render("Yandex:       "+urls.Yandex))
+		}
+		if urls.Bing != "" {
+			lines = append(lines, followupStyle.Render("Bing:         "+urls.Bing))
+		}
+	}
+
+	// Cross-session hits.
+	for _, hit := range intel.CrossSessionHits {
+		date := ""
+		if !hit.FoundAt.IsZero() {
+			date = hit.FoundAt.Format("2006-01-02")
+		}
+		detail := fmt.Sprintf("photo matches case #%d (%s)", hit.CaseID, hit.PhoneE164)
+		if date != "" {
+			detail += " — " + date
+		}
+		detail += fmt.Sprintf(" — Hamming: %d", hit.HammingDist)
+		lines = append(lines, breachHitStyle.Render("  ↔ Cross-session: "+detail))
+	}
+
 	return lipgloss.JoinVertical(lipgloss.Left, title, strings.Join(lines, "\n"))
 }
 
@@ -557,9 +669,11 @@ func pivotChainLines(node *core.PivotChainNode, depth int) []string {
 	return lines
 }
 
-type IdentityRecordBlock struct{}
+type IdentityRecordBlock struct {
+	MinConfidence float64
+}
 
-func (IdentityRecordBlock) Render(report *core.InvestigationReport) string {
+func (b IdentityRecordBlock) Render(report *core.InvestigationReport) string {
 	title := sectionTitleStyle.Render("IDENTITY RECORD")
 	record := identityRecord(report)
 	if record == nil {
@@ -570,11 +684,15 @@ func (IdentityRecordBlock) Render(report *core.InvestigationReport) string {
 	}
 
 	lines := []string{}
-	if top := topVisible(record.Names); top != nil {
-		lines = append(lines, row("Top name", candidateLine(*top)))
+
+	// Top name — best available regardless of suppression status.
+	if len(record.Names) > 0 {
+		lines = append(lines, row("Top name", candidateLine(record.Names[0])))
 	} else {
-		lines = append(lines, row("Top name", "none above display threshold"))
+		lines = append(lines, row("Top name", "none found"))
 	}
+
+	// Truecaller direct record.
 	if record.Truecaller != nil {
 		tc := record.Truecaller
 		parts := []string{"sourced from Truecaller"}
@@ -592,34 +710,329 @@ func (IdentityRecordBlock) Render(report *core.InvestigationReport) string {
 		}
 		lines = append(lines, row("Truecaller", strings.Join(parts, " | ")))
 	}
-	if top := topVisible(record.Addresses); top != nil {
-		value := candidateLine(*top)
+
+	// Names — all candidates with ✓/~/? indicators.
+	if len(record.Names) > 0 {
+		hidden := appendCandidateSection(&lines, "Names", record.Names, b.MinConfidence)
+		if hidden > 0 {
+			lines = append(lines, followupStyle.Render(fmt.Sprintf(
+				"  (%d findings below %.2f confidence threshold — use --format json to see all)",
+				hidden, b.MinConfidence)))
+		}
+	}
+
+	// Addresses — top summary line + full section when multiple exist.
+	if len(record.Addresses) > 0 {
+		top := record.Addresses[0]
+		value := candidateLine(top)
 		if strings.TrimSpace(top.DecayNote) != "" {
-			value += " - " + top.DecayNote
+			value += " — " + top.DecayNote
 		}
 		lines = append(lines, row("Top address", value))
+		if len(record.Addresses) > 1 {
+			hidden := appendCandidateSection(&lines, "Addresses", record.Addresses, b.MinConfidence)
+			if hidden > 0 {
+				lines = append(lines, followupStyle.Render(fmt.Sprintf(
+					"  (%d findings below %.2f confidence threshold — use --format json to see all)",
+					hidden, b.MinConfidence)))
+			}
+		}
 	}
-	if top := topVisible(record.DOBs); top != nil {
+
+	// DOB — top candidate only (multiple DOBs appear in Conflicts).
+	if len(record.DOBs) > 0 {
+		top := record.DOBs[0]
 		label := top.Precision
 		if label == "" {
 			label = "observed"
 		}
 		lines = append(lines, row("DOB", fmt.Sprintf("%s (%s, %s)", top.DisplayValue, label, top.ConfidenceLabel)))
 	}
-	if emails := visibleValues(record.Emails, 5); len(emails) > 0 {
-		lines = append(lines, row("Email pivots", strings.Join(emails, ", ")))
+
+	// Email pivots — filtered by minConfidence when set.
+	emailVals := make([]string, 0, len(record.Emails))
+	for _, c := range record.Emails {
+		if b.MinConfidence > 0 && c.Confidence < b.MinConfidence {
+			continue
+		}
+		if len(emailVals) >= 5 {
+			break
+		}
+		emailVals = append(emailVals, c.DisplayValue)
 	}
+	if len(emailVals) > 0 {
+		lines = append(lines, row("Email pivots", strings.Join(emailVals, ", ")))
+	}
+
+	// Conflicts.
 	for _, conflict := range record.Conflicts {
 		lines = append(lines, valueStyle.Render(fmt.Sprintf("- conflict %s: %s [%s] vs %s [%s], penalty %.2f",
 			conflict.Field, conflict.ValueA, conflict.SourceA, conflict.ValueB, conflict.SourceB, conflict.PenaltyApplied)))
 	}
-	if record.SuppressedCount > 0 {
-		lines = append(lines, row("Suppressed", fmt.Sprintf("%d below 0.45 confidence; retained in JSON", record.SuppressedCount)))
-	}
+
 	if len(lines) == 0 {
 		lines = append(lines, row("Status", "no identity candidates found"))
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, title, strings.Join(lines, "\n"))
+}
+
+// appendCandidateSection appends a labelled list of candidates with ✓/~/? indicators.
+// Returns the count hidden by minConfidence (0 = show all).
+func appendCandidateSection(lines *[]string, label string, candidates []correlator.FieldCandidate, minConfidence float64) int {
+	*lines = append(*lines, valueStyle.Render("  "+label+":"))
+	hidden := 0
+	for _, c := range candidates {
+		if minConfidence > 0 && c.Confidence < minConfidence {
+			hidden++
+			continue
+		}
+		indicator := confidenceTierIndicator(c.Confidence)
+		src := sourceNamesShort(c.Sources)
+		*lines = append(*lines, valueStyle.Render(fmt.Sprintf("    %s %-24s  %.2f  [%s]", indicator, c.DisplayValue, c.Confidence, src)))
+	}
+	return hidden
+}
+
+// confidenceTierIndicator returns ✓ for ≥0.65, ~ for 0.45–0.64, ? for <0.45.
+func confidenceTierIndicator(confidence float64) string {
+	switch {
+	case confidence >= correlator.MediumConfidenceThreshold:
+		return "✓"
+	case confidence >= correlator.LowConfidenceThreshold:
+		return "~"
+	default:
+		return "?"
+	}
+}
+
+// sourceNamesShort returns a comma-joined list of source names (no tier suffix).
+func sourceNamesShort(sources []correlator.SourceMeta) string {
+	names := make([]string, 0, len(sources))
+	for _, s := range sources {
+		if s.Name != "" {
+			names = append(names, s.Name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
+
+type InfrastructureIntelligenceBlock struct{}
+
+func (InfrastructureIntelligenceBlock) Render(report *core.InvestigationReport) string {
+	title := sectionTitleStyle.Render("INFRASTRUCTURE INTELLIGENCE")
+
+	raw := moduleResult(report, "infrastructure")
+	if raw == nil {
+		return lipgloss.JoinVertical(lipgloss.Left, title, row("Status", "not available"))
+	}
+	if raw.Status == core.ModuleStatusGated {
+		return lipgloss.JoinVertical(lipgloss.Left, title, row("Status", "gated — use --active to enable"))
+	}
+
+	result := infraResult(raw)
+	if result == nil {
+		return lipgloss.JoinVertical(lipgloss.Left, title, row("Status", "not available"))
+	}
+
+	lines := []string{}
+
+	// Certificates
+	certCount := len(result.CertHits)
+	if certCount == 0 {
+		lines = append(lines, row("Certificates", "no hits"))
+	} else {
+		lines = append(lines, row("Certificates", fmt.Sprintf("%d domain(s) found via SSL CT logs", certCount)))
+		for _, hit := range result.CertHits {
+			detail := hit.Domain
+			if hit.IssuedAt != "" {
+				detail += " (issued " + hit.IssuedAt
+				if hit.Issuer != "" {
+					detail += ", " + hit.Issuer
+				}
+				detail += ")"
+			}
+			lines = append(lines, cleanStyle.Render("  ✓ "+detail))
+		}
+	}
+
+	// WHOIS / RDAP
+	whoisCount := len(result.WhoisHits)
+	if whoisCount == 0 {
+		lines = append(lines, row("WHOIS", "no hits"))
+	} else {
+		lines = append(lines, row("WHOIS", fmt.Sprintf("%d registrant match(es)", whoisCount)))
+		for _, hit := range result.WhoisHits {
+			detail := hit.Domain + " — Registrant: "
+			if hit.RegistrantName != "" {
+				detail += hit.RegistrantName
+			} else {
+				detail += "unknown"
+			}
+			if hit.RegistrantEmail != "" {
+				detail += ", " + hit.RegistrantEmail
+			}
+			if hit.RegistrationDate != "" {
+				detail += " (" + hit.RegistrationDate + ")"
+			}
+			lines = append(lines, cleanStyle.Render("  ✓ "+detail))
+		}
+	}
+
+	// VirusTotal
+	findings := raw.Findings
+	vtConfigured := strings.EqualFold(findings["vt_configured"], "true")
+	vtHitCount, _ := strconv.Atoi(findings["vt_hit_count"])
+
+	var vtLine string
+	var vtStyle lipgloss.Style
+	switch {
+	case !vtConfigured:
+		vtLine = "no hits  (VIRUSTOTAL_API_KEY not configured)"
+		vtStyle = valueStyle
+	case vtHitCount > 0:
+		vtLine = fmt.Sprintf("%d hit(s)", vtHitCount)
+		if labels := strings.TrimSpace(findings["vt_threat_labels"]); labels != "" {
+			vtLine += " — " + labels
+		}
+		vtStyle = breachHitStyle
+	default:
+		vtLine = "no hits"
+		vtStyle = valueStyle
+	}
+	lines = append(lines, row("VirusTotal", vtStyle.Render(vtLine)))
+
+	// MalwareBazaar
+	mbCount, _ := strconv.Atoi(findings["malware_sample_count"])
+	var mbLine string
+	var mbStyle lipgloss.Style
+	if mbCount > 0 {
+		mbLine = fmt.Sprintf("%d sample(s) found", mbCount)
+		if families := strings.TrimSpace(findings["malware_families"]); families != "" {
+			mbLine += " — " + families
+		}
+		mbStyle = breachHitStyle
+	} else {
+		mbLine = "no hits"
+		mbStyle = valueStyle
+	}
+	lines = append(lines, row("MalwareBazaar", mbStyle.Render(mbLine)))
+
+	return lipgloss.JoinVertical(lipgloss.Left, title, strings.Join(lines, "\n"))
+}
+
+func infraResult(result *core.ModuleResult) *infrastructure.InfrastructureResult {
+	if result == nil || result.Data == nil {
+		return nil
+	}
+	if r, ok := result.Data.(infrastructure.InfrastructureResult); ok {
+		return &r
+	}
+	data, err := json.Marshal(result.Data)
+	if err != nil {
+		return nil
+	}
+	var r infrastructure.InfrastructureResult
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil
+	}
+	return &r
+}
+
+type IntelligenceScreeningBlock struct{}
+
+func (IntelligenceScreeningBlock) Render(report *core.InvestigationReport) string {
+	title := sectionTitleStyle.Render("INTELLIGENCE SCREENING")
+
+	raw := moduleResult(report, "intelligence")
+	if raw == nil {
+		return lipgloss.JoinVertical(lipgloss.Left, title, row("Status", "not available"))
+	}
+	if raw.Status == core.ModuleStatusGated {
+		return lipgloss.JoinVertical(lipgloss.Left, title, row("Status", "gated — use --active to enable"))
+	}
+
+	intel := intelligenceResult(raw)
+	if intel == nil {
+		return lipgloss.JoinVertical(lipgloss.Left, title, row("Status", "not available"))
+	}
+
+	lines := []string{}
+
+	// Sanctions section.
+	sanctions := intel.Sanctions
+	hitCount := len(sanctions.Hits)
+	switch {
+	case hitCount == 0:
+		listCount := len(sanctions.ListsChecked)
+		note := fmt.Sprintf("clean (%d+ lists checked)", listCount+94)
+		lines = append(lines, row("Sanctions", cleanStyle.Render(note)))
+	case sanctions.HighRisk:
+		lines = append(lines, row("Sanctions", breachHitStyle.Render(fmt.Sprintf("%d hit (HIGH RISK)", hitCount))))
+	default:
+		lines = append(lines, row("Sanctions", valueStyle.Render(fmt.Sprintf("%d hit", hitCount))))
+	}
+	for _, hit := range sanctions.Hits {
+		parts := []string{hit.Name}
+		if hit.Position != "" {
+			parts = append(parts, hit.Position)
+		}
+		datasets := strings.Join(hit.Datasets, ", ")
+		detail := fmt.Sprintf("score: %.2f — [%s]", hit.Score, datasets)
+		hitStyle := valueStyle
+		if hit.Score >= 0.85 {
+			hitStyle = breachHitStyle
+		}
+		lines = append(lines, hitStyle.Render(fmt.Sprintf("  ✓ %s — %s", strings.Join(parts, " — "), detail)))
+	}
+
+	// Adverse media section.
+	media := intel.Media
+	switch {
+	case media.ArticleCount == 0:
+		lines = append(lines, row("Adverse Media", cleanStyle.Render("no adverse coverage found")))
+	default:
+		lines = append(lines, row("Adverse Media", valueStyle.Render(fmt.Sprintf("%d article(s)", media.ArticleCount))))
+		shown := 0
+		for _, a := range media.Articles {
+			if shown >= 2 {
+				remaining := len(media.Articles) - shown
+				if remaining > 0 {
+					lines = append(lines, valueStyle.Render(fmt.Sprintf("  ~ %d more article(s)", remaining)))
+				}
+				break
+			}
+			date := ""
+			if !a.PublishedAt.IsZero() {
+				date = a.PublishedAt.Format("2006-01-02")
+			}
+			line := fmt.Sprintf("  ✓ %q — %s", a.Title, a.Source)
+			if date != "" {
+				line += fmt.Sprintf(" (%s)", date)
+			}
+			lines = append(lines, breachHitStyle.Render(line))
+			shown++
+		}
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, title, strings.Join(lines, "\n"))
+}
+
+func intelligenceResult(result *core.ModuleResult) *intelligence.IntelligenceResult {
+	if result == nil || result.Data == nil {
+		return nil
+	}
+	if r, ok := result.Data.(intelligence.IntelligenceResult); ok {
+		return &r
+	}
+	data, err := json.Marshal(result.Data)
+	if err != nil {
+		return nil
+	}
+	var r intelligence.IntelligenceResult
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil
+	}
+	return &r
 }
 
 type RiskScoreBlock struct{}

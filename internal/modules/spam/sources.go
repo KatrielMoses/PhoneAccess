@@ -92,3 +92,9 @@ func internationalDigits(number *core.PhoneNumber) string {
 func pathEscape(value string) string {
 	return url.PathEscape(strings.TrimSpace(value))
 }
+
+func (eightHundredNotesSource) ProxyAware() bool { return true }
+
+func (whoCalledUsSource) ProxyAware() bool { return true }
+
+func (spamCallsSource) ProxyAware() bool { return true }

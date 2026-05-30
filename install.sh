@@ -2,7 +2,7 @@
 set -e
 
 REPO="KatrielMoses/PhoneAccess"
-VERSION="v1.0.6"
+VERSION="v2.0.0"
 ARCH=$(uname -m)
 
 case $ARCH in

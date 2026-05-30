@@ -7,10 +7,14 @@ import (
 	"github.com/KatrielMoses/PhoneAccess/internal/modules/enumerator"
 	"github.com/KatrielMoses/PhoneAccess/internal/modules/finance"
 	"github.com/KatrielMoses/PhoneAccess/internal/modules/geo"
+	"github.com/KatrielMoses/PhoneAccess/internal/modules/images"
+	"github.com/KatrielMoses/PhoneAccess/internal/modules/infrastructure"
+	"github.com/KatrielMoses/PhoneAccess/internal/modules/intelligence"
 	"github.com/KatrielMoses/PhoneAccess/internal/modules/paste"
 	publicrecords "github.com/KatrielMoses/PhoneAccess/internal/modules/publicrecords"
 	"github.com/KatrielMoses/PhoneAccess/internal/modules/reverse"
 	"github.com/KatrielMoses/PhoneAccess/internal/modules/search"
+	"github.com/KatrielMoses/PhoneAccess/internal/modules/social/signal"
 	"github.com/KatrielMoses/PhoneAccess/internal/modules/social/telegram"
 	"github.com/KatrielMoses/PhoneAccess/internal/modules/social/whatsapp"
 	"github.com/KatrielMoses/PhoneAccess/internal/modules/spam"
@@ -32,8 +36,12 @@ func Registry() []core.Module {
 		paste.New(),
 		reverse.New(),
 		truecaller.New(),
+		signal.New(),
 		telegram.New(),
 		whatsapp.New(),
+		images.New(),
+		infrastructure.New(),
+		intelligence.New(),
 		NewStubModule(),
 	}
 }

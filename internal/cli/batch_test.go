@@ -151,6 +151,7 @@ func TestBatchActiveFlagRunsActiveModules(t *testing.T) {
 	opts := &options{
 		timeoutSecs: 30,
 		active:      true,
+		yes:         true, // skip OPSEC prompt in non-interactive test
 		allModules:  []core.Module{batchFakeModule{name: "enumerator", tier: core.TierActive}},
 	}
 	now := time.Date(2026, 5, 27, 6, 7, 8, 0, time.UTC)
@@ -212,3 +213,5 @@ func (m batchFakeModule) Run(ctx context.Context, number *core.PhoneNumber) (*co
 		},
 	}, nil
 }
+
+func (m batchFakeModule) ProxyAware() bool { return true }

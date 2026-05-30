@@ -171,3 +171,9 @@ func (m *recordingModule) Run(context.Context, *PhoneNumber) (*ModuleResult, err
 	m.runCount++
 	return &ModuleResult{ModuleName: m.name, Status: ModuleStatusSuccess}, nil
 }
+
+func (m dryRunFakeModule) ProxyAware() bool { return true }
+
+func (m staticModule) ProxyAware() bool { return true }
+
+func (m *recordingModule) ProxyAware() bool { return true }

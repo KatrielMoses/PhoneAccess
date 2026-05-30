@@ -134,3 +134,5 @@ func (r leaksightResponse) Items() []leakItem {
 	}
 	return items
 }
+
+func (s *Source) ProxyAware() bool { return true }
